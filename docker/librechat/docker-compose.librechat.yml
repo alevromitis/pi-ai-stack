@@ -1,0 +1,201 @@
+name: librechat
+
+# Topology
+# --------
+#   librechat    web UI + API on ${APP_PORT}:${APP_CONTAINER_PORT}, three networks:
+#                  external  default route, published-port address (see `priority`)
+#                  internal  mongodb + meilisearch, no off-host route
+#                  litert    litert-lm-external (owned by litert-lm stack)
+#   mongodb      conversation/user store, `internal` only, --noauth, unreachable off-host
+#   meilisearch  conversation search index, `internal` only
+#
+# Model provider (litert-lm-1:9379) is external. That stack must be up first.
+# Upstream: https://github.com/danny-avila/LibreChat/blob/v0.8.7/docker-compose.yml
+# Divergences: env_file (not bind-mount), no rag_api/vectordb (no embeddings endpoint),
+# no admin-panel/nginx, split internal/external networks
+
+services:
+  librechat:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#      target: production
+    # digest for v0.8.7:
+    #   sha256:c5db3331b845e1f289f8d04c0c77936c4bbe372f76730a804abc1c37e44d23a9
+    image: ghcr.io/danny-avila/librechat:${TAG:-v0.8.7}
+    container_name: librechat-1
+    restart: unless-stopped
+    # The image declares USER node (uid 1000) and pre-creates /app/uploads,
+    # /app/logs and /app/client/public/images owned by it, so the bind mounts
+    # below must be chown 1000:1000 on the host. See the README.
+    user: "1000:1000"
+#    privileged: "true"
+#    command: ""
+    security_opt:
+      - "no-new-privileges:true"
+#    links:
+#      - container
+#    cap_add:
+#      - rule
+#    labels:
+#      - "traefik.enable=false"
+    environment:
+      # Fixed wiring (unchanging per deployment). Edit in .env or .env.librechat.
+      HOST: 0.0.0.0
+      # Keep identical: PORT is Node bind, APP_CONTAINER_PORT is published side.
+      PORT: ${APP_CONTAINER_PORT:-3080}
+      MONGO_URI: mongodb://librechat-mongodb-1:27017/LibreChat
+      MEILI_HOST: http://librechat-meilisearch-1:7700
+      SEARCH: "true"
+      CONFIG_PATH: /app/librechat.yaml
+    env_file:
+      # .env is auto-loaded for interpolation in ports:/volumes (env_file doesn't).
+      - .env
+      - .env.librechat
+    ports:
+      - "${APP_PORT:-3080}:${APP_CONTAINER_PORT:-3080}"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    healthcheck:
+      # The image is node:alpine - it ships busybox wget, not curl.
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:${APP_CONTAINER_PORT:-3080}/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # API takes time to connect to Mongo and load librechat.yaml on startup.
+      start_period: 90s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "2.0"
+#          memory: 2G
+#        reservations:
+#          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      # priority: highest becomes default route and published-port address.
+      external:
+        priority: 100
+      internal:
+        priority: 50
+      litert:
+        priority: 10
+#    dns:
+#      - ""
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      # Admin config (custom endpoints, interface), read-only.
+      - ./librechat-config/librechat.yaml:/app/librechat.yaml:ro
+      - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/uploads:/app/uploads
+      - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/images:/app/client/public/images
+      - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/logs:/app/logs
+#    devices:
+#      - "/dev/null"
+#    read_only: true
+    tmpfs:
+      - /tmp
+#      - /run:exec
+
+  mongodb:
+    # digest for 8.0.20:
+    #   sha256:098862b1339f031900ca66cf8fef799e616d6324fa41b9a263f2ec899552c1ef
+    image: mongo:${MONGO_TAG:-8.0.20}
+    container_name: librechat-mongodb-1
+    restart: unless-stopped
+    # Data dir must be chown 1000:1000 before first start (matches upstream).
+    user: "1000:1000"
+    security_opt:
+      - "no-new-privileges:true"
+    # --noauth safe only on `internal` (no off-host route, no port). Don't move to `external`.
+    command: ["mongod", "--noauth", "--bind_ip_all"]
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 1G
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${LIBRECHAT_MONGO_DATA_DIR:?set LIBRECHAT_MONGO_DATA_DIR in .env}:/data/db
+#    read_only: true
+    tmpfs:
+      - /tmp
+
+  meilisearch:
+    # digest for v1.35.1:
+    #   sha256:8b57fc3c7f46535ddef3828df1538465ac19d892eb57c9a10da6df0880bd5856
+    image: getmeili/meilisearch:${MEILI_TAG:-v1.35.1}
+    container_name: librechat-meilisearch-1
+    restart: unless-stopped
+    user: "1000:1000"
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    env_file:
+      # Reads MEILI_MASTER_KEY from .env.librechat (LibreChat needs it too).
+      - .env
+      - .env.librechat
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:7700/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 1G
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${LIBRECHAT_MEILI_DATA_DIR:?set LIBRECHAT_MEILI_DATA_DIR in .env}:/meili_data
+#    read_only: true
+    tmpfs:
+      - /tmp
+
+networks:
+  external:
+    name: librechat-external
+    driver: bridge
+  internal:
+    name: librechat-internal
+    driver: bridge
+    internal: true
+  litert:
+    # Owned by litert-lm stack. Declared external so we join it (not duplicate).
+    name: ${LITERT_NETWORK:-litert-lm-external}
+    external: true

@@ -1,0 +1,42 @@
+# LibreChat application config.
+# Docs: https://www.librechat.ai/docs/configuration/librechat_yaml
+#
+# Schema v1.3.13 for LibreChat v0.8.7 (see TAG in .env). Bump with image tag.
+version: 1.3.13
+cache: true
+
+endpoints:
+  custom:
+    # LiteRT-LM's `serve` command exposes an OpenAI-compatible server on
+    # 0.0.0.0:9379 implementing exactly two routes:
+    #   GET  /v1/models            -> feeds models.fetch below
+    #   POST /v1/chat/completions  -> streaming supported
+    # There is no /v1/embeddings, no tool calling and no vision. That is why
+    # this stack ships no rag_api/vectordb: file search would have no
+    # embeddings provider. See README.
+    - name: 'LiteRT-LM'
+      # From .env.librechat. Missing vars fail with "Missing API Key/Base URL".
+      apiKey: '${LITERT_LM_API_KEY}'
+      baseURL: '${LITERT_LM_BASE_URL}'
+      models:
+        # Fetched from GET /v1/models. `default` is fallback (required non-empty).
+        fetch: true
+        default:
+          - 'gemma3-4b'
+      # Titles via same chat-completions route. 'current_model' avoids pinning non-existent name.
+      titleConvo: true
+      titleModel: 'current_model'
+      modelDisplayLabel: 'LiteRT-LM'
+      # LiteRT-LM accepts only `model` and `messages`. Add parameters if 400 errors occur.
+      dropParams:
+        - 'user'
+        - 'presence_penalty'
+        - 'frequency_penalty'
+        - 'stop'
+
+  # NOTE on SSRF: LibreChat validates baseURLs against a private-address block
+  # only when the URL is user-supplied (`baseURL: 'user_provided'`). The
+  # admin-configured baseURL above is not subject to it, so no exemption is
+  # needed. If you ever switch this endpoint to user_provided, add:
+  # allowedAddresses:
+  #   - 'litert-lm-1:9379'
