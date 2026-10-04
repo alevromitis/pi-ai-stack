@@ -1,0 +1,142 @@
+name: searxng
+
+services:
+  valkey:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#      target: production
+    image: docker.io/valkey/valkey:${VALKEY_TAG:-7-alpine}
+    container_name: searxng-valkey-1
+    restart: unless-stopped
+#    user: "1000:1000"
+    command: valkey-server --save "" --appendonly no
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+#    labels:
+#      - "traefik.enable=false"
+#    environment:
+#      NODE_ENV: production
+#    env_file:
+#      - .env.common
+#      - .env.app
+#    ports:
+#      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 512M
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+#    network_mode: service:tailscale
+#    dns:
+#      - ""
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - valkey-data:/data
+#      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+#    devices:
+#      - "/dev/null"
+#    read_only: true
+    tmpfs:
+      - /tmp
+#      - /run:exec
+
+  searxng:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#      target: production
+    image: docker.io/searxng/searxng:${TAG:-latest}
+    container_name: searxng-1
+    restart: unless-stopped
+#    user: "1000:1000"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+#    labels:
+#      - "traefik.enable=false"
+#    environment:
+#      - SEARXNG_BASE_URL=http://${SEARXNG_HOST:-127.0.0.1}:${SEARXNG_PORT:-8080}/
+    env_file:
+      - .env.searxng
+#      - .env.app
+    ports:
+      - "${APP_PORT:-8081}:${APP_CONTAINER_PORT:-8080}"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test: []
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 512M
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - external
+      - internal
+#    network_mode: service:tailscale
+#    dns:
+#      - ""
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # settings.yml holds secret_key - kept on the host, not in this repo.
+      - ${SEARXNG_CONFIG_DIR:?set SEARXNG_CONFIG_DIR in .env}:/etc/searxng:rw
+#    devices:
+#      - "/dev/null"
+#    read_only: true
+    tmpfs:
+      - /tmp
+#      - /run:exec
+
+networks:
+  external:
+    name: searxng-external
+    driver: bridge
+  internal:
+    name: searxng-internal
+    driver: bridge
+    internal: true
+
+volumes:
+  valkey-data:

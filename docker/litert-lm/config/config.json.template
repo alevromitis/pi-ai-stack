@@ -1,0 +1,12 @@
+{
+  "default": {
+    "backend": "cpu",
+    "max_num_tokens": ${LITERT_MAX_NUM_TOKENS}
+  },
+  "models": {
+    "${LITERT_MODEL_ID}": {
+      "backend": "${LITERT_BACKEND}",
+      "max_num_tokens": ${LITERT_MAX_NUM_TOKENS}
+    }
+  }
+}

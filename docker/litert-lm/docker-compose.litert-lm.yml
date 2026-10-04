@@ -1,0 +1,60 @@
+name: litert-lm
+
+# Owns the `litert-lm-external` network that librechat joins as external.
+
+services:
+  litert-lm:
+    build:
+      context: ./
+    image: litert-lm-rpi5:local
+    container_name: litert-lm-1
+    platform: linux/arm64
+    restart: unless-stopped
+    privileged: true
+    # Give the container access to the Pi 5's GPU (VideoCore VII / V3D) render
+    # nodes so the Vulkan/V3DV backend can be used instead of CPU-only.
+#    devices:
+#      - /dev/dri:/dev/dri
+    environment:
+      # HUGGING_FACE_HUB_TOKEN comes from .env.litert-lm via env_file. It is
+      # deliberately NOT listed here: `environment:` overrides env_file, and
+      # interpolating it from .env would replace the token with "".
+      LITERT_HF_REPO: "${LITERT_HF_REPO:-litert-community/gemma-4-E2B-it-litert-lm}"
+      LITERT_MODEL_FILE: "${LITERT_MODEL_FILE:-gemma-4-E2B-it.litertlm}"
+      LITERT_MODEL_ID: "${LITERT_MODEL_ID:-gemma4-e2b}"
+      # gpu = experimental Vulkan/V3DV backend (this is what was asked for).
+      # cpu = safe fallback; today CPU is still often *faster* than the Pi 5's
+      # experimental GPU path (see README "GPU on the Pi 5" section).
+      LITERT_BACKEND: "${LITERT_BACKEND:-gpu}"
+      # Total context window (tokens) reserved for prompt + response.
+      # Bigger = handles longer chats/system prompts, but costs more RAM for
+      # the KV cache — watch memory if you raise this much further.
+      LITERT_MAX_NUM_TOKENS: "${LITERT_MAX_NUM_TOKENS:-8192}"
+      # Required by LiteRT to opt in to the experimental V3DV/WebGPU path.
+#      V3D_WEBGPU_OVERRIDE: "1"
+    env_file:
+      - .env.litert-lm
+    volumes:
+      # Persists the LiteRT-LM model registry + config.json across restarts
+      # so models aren't re-downloaded every time the container starts.
+      - litert-registry:/root/.litert-lm
+    ports:
+      - "${APP_PORT:-9379}:${APP_CONTAINER_PORT:-9379}"
+    networks:
+      - external
+#    mem_limit: "${LITERT_MEM_LIMIT:-6g}"
+#    mem_reservation: "${LITERT_MEM_RESERVATION:-4g}"
+    # Equal to mem_limit = no extra swap allowed for this container at all.
+#    memswap_limit: "${LITERT_MEM_LIMIT:-6g}"
+
+volumes:
+  litert-registry:
+    # Pinned: the stack ran as Compose project `litert`, and the imported
+    # model lives in this volume. Without `name:` the project rename would
+    # create an empty litert-lm_litert-registry and re-download the model.
+    name: litert_litert-registry
+
+networks:
+  external:
+    driver: bridge
+    name: litert-lm-external
