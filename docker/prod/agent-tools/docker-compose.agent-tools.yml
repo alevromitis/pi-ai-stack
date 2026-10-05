@@ -1,0 +1,168 @@
+name: agent-tools
+
+# Topology
+# --------
+#   MCP servers for LibreChat agents, reached over Streamable HTTP at
+#   http://<container>:<port>/mcp. Nothing is published on the host.
+#
+#   internal  agent-tools-internal (internal: true). LibreChat joins it as
+#             external. Shell and filesystem live ONLY here: no internet,
+#             no LAN, no host - an injected prompt can't exfiltrate or pivot.
+#   egress    agent-tools-egress. Playwright's browser needs the internet.
+#             Docker NAT also reaches the LAN; see README "Agent tools".
+#
+#   mcp-shell       :8000  allowlisted commands, cwd /workspace
+#   mcp-filesystem  :8000  read/write confined to /workspace
+#   mcp-playwright  :8931  headless Chromium; files to /workspace/playwright
+#
+# All three share ${AGENT_WORKSPACE_DIR} as /workspace (uid 1000), the only
+# host path any of them can touch.
+
+x-sandbox: &sandbox
+  restart: unless-stopped
+  user: "1000:1000"
+  security_opt:
+    - "no-new-privileges:true"
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  mcp-shell:
+    <<: *sandbox
+    build:
+      context: ./
+    image: agent-tools-mcp:local
+    container_name: mcp-shell-1
+    command:
+      - supergateway
+      - --stdio
+      - mcp-shell-server
+      - --outputTransport
+      - streamableHttp
+      - --port
+      - "8000"
+      - --healthEndpoint
+      - /healthz
+    environment:
+      # argv only, no shell string. python3 makes this effectively "run any
+      # code" - the container (no network, /workspace only, limits) is the
+      # real boundary, as mcp-shell-server's README requires.
+      ALLOW_COMMANDS: "${SHELL_ALLOW_COMMANDS:?set SHELL_ALLOW_COMMANDS in .env}"
+      MCP_SHELL_DEFAULT_TIMEOUT_SECONDS: "30"
+      MCP_SHELL_MAX_TIMEOUT_SECONDS: "120"
+      # 8k-token model: keep tool output small (LibreChat trims further).
+      MCP_SHELL_OUTPUT_LIMIT_BYTES: "16384"
+    healthcheck: &mcp-health
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+          pids: 128
+    networks:
+      - internal
+    volumes:
+      - ${AGENT_WORKSPACE_DIR:?set AGENT_WORKSPACE_DIR in .env}:/workspace
+
+  mcp-filesystem:
+    <<: *sandbox
+    image: agent-tools-mcp:local
+    container_name: mcp-filesystem-1
+    depends_on:
+      # Shares mcp-shell's image; let that service build it first.
+      mcp-shell:
+        condition: service_started
+    command:
+      - supergateway
+      - --stdio
+      - mcp-server-filesystem /workspace
+      - --outputTransport
+      - streamableHttp
+      - --port
+      - "8000"
+      - --healthEndpoint
+      - /healthz
+    healthcheck: *mcp-health
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+          pids: 64
+    networks:
+      - internal
+    volumes:
+      - ${AGENT_WORKSPACE_DIR:?set AGENT_WORKSPACE_DIR in .env}:/workspace
+
+  mcp-playwright:
+    <<: *sandbox
+    # Upstream publishes only :latest; pinned by digest so watchtower leaves it.
+    image: mcr.microsoft.com/playwright/mcp@${PLAYWRIGHT_MCP_DIGEST:?set PLAYWRIGHT_MCP_DIGEST in .env}
+    container_name: mcp-playwright-1
+    init: true
+    entrypoint: ["node", "/app/cli.js"]
+    command:
+      - --headless
+      - --browser
+      - chromium
+      # Chromium's own sandbox needs user namespaces; the container is the sandbox.
+      - --no-sandbox
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8931"
+      # Host header LibreChat sends; the default only allows the bind address.
+      - --allowed-hosts
+      - mcp-playwright-1:8931
+      # Profile in memory: nothing persists between sessions.
+      - --isolated
+      - --output-dir
+      - /workspace/playwright
+    tmpfs:
+      - /tmp
+      # Chromium writes its crashpad/cache under $HOME.
+      - /home/node:uid=1000,gid=1000
+    # Chromium crashes on Docker's 64M /dev/shm with real pages.
+    shm_size: 256m
+    healthcheck:
+      # Any HTTP answer means the server is up; /mcp rejects a bare GET.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8931/mcp').then(()=>process.exit(0),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+          pids: 512
+    networks:
+      egress:
+        priority: 100
+      internal:
+        priority: 50
+    volumes:
+      - ${AGENT_WORKSPACE_DIR:?set AGENT_WORKSPACE_DIR in .env}:/workspace
+
+networks:
+  internal:
+    name: agent-tools-internal
+    driver: bridge
+    internal: true
+  egress:
+    name: agent-tools-egress
+    driver: bridge
