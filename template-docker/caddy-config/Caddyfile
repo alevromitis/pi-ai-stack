@@ -1,0 +1,10 @@
+# Caddy env placeholders are {$VAR}, NOT ${VAR}. ${VAR} is not expanded by
+# Caddy and is parsed as a literal, so the upstream address never resolves.
+# CADDY_PORT and APP_CONTAINER_PORT come from .env via env_file.
+:{$CADDY_PORT:8080} {
+    # Send traffic to the app's in-container listening port.
+    reverse_proxy app-1:{$APP_CONTAINER_PORT:3000} {
+        # Forward the client's real IP address
+        header_up X-Real-IP {remote_host}
+    }
+}

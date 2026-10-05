@@ -1,0 +1,192 @@
+name: app
+
+# Topology
+# --------
+#   tailscale  owns netns, joins `external` bridge
+#   caddy      shares tailscale's netns; Serve's 127.0.0.1:${CADDY_PORT} reaches it
+#   app        on `external` bridge; caddy reaches it as `app-1`
+#
+# caddy must NOT declare `networks` - conflicts with `network_mode`. Without it,
+# caddy lands on default bridge where Serve and `app-1` can't reach it.
+
+services:
+  app:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#      target: production
+    image: app:${TAG:-latest}
+    container_name: app-1
+    restart: unless-stopped
+    user: "1000:1000"
+#    privileged: "true"
+#    command: ""
+    security_opt:
+      - "no-new-privileges:true"
+#    links:
+#      - container
+#    cap_add:
+#      - rule
+#    labels:
+#      - "traefik.enable=false"
+#    environment:
+#      NODE_ENV: production
+#      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+#      REDIS_URL: redis://cache:6379
+    env_file:
+      # .env is auto-loaded for interpolation in ports:/volumes (env_file doesn't).
+      - .env
+      - .env.app
+#    ports:
+#      - "${APP_PORT:-3000}:${APP_CONTAINER_PORT:-3000}"
+#    depends_on:
+#      db:
+#        condition: service_healthy
+#      cache:
+#        condition: service_healthy
+    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: []
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 512M
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - external
+#      - internal
+#    dns:
+#      - ""
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${APP_DATA_DIR:?set APP_DATA_DIR in .env}:/app/data
+#      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+#    devices:
+#      - "/dev/null"
+#    read_only: true
+    tmpfs:
+      - /tmp
+#      - /run:exec
+
+  tailscale:
+    image: tailscale/tailscale:${TAILSCALE_TAG:-latest}
+    container_name: app-tailscale-1
+    restart: unless-stopped
+#    user: "1000:1000"          # tailscaled needs root to manage the netns
+#    privileged: "true"
+#    command: ""
+    security_opt:
+      - "no-new-privileges:true"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+#    labels:
+#      - "traefik.enable=false"
+    env_file:
+      - .env
+      - .env.tailscale
+#    ports:
+#      - "${APP_PORT:-3000}:${APP_CONTAINER_PORT:-3000}"
+    healthcheck:
+      test: ["CMD-SHELL", "tailscale status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 512M
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - external
+#      - internal
+#    dns:
+#      - ""
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${APP_TAILSCALE_STATE_DIR:?set APP_TAILSCALE_STATE_DIR in .env}:/var/lib/tailscale
+      - ./tailscale-config/serve-config.json:/config/serve-config.json:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+#    read_only: true
+    tmpfs:
+      - /tmp
+#      - /run:exec
+
+  caddy:
+    image: caddy:${CADDY_TAG:-2}
+    container_name: app-caddy-1
+    restart: unless-stopped
+    user: "1000:1000"
+#    privileged: "true"
+#    command: ""
+    security_opt:
+      - "no-new-privileges:true"
+#    labels:
+#      - "traefik.enable=false"
+    env_file:
+      - .env
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${CADDY_PORT:-8080}/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 512M
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Shares tailscale's netns; Serve reaches Caddy. Don't add `networks:` (conflicts).
+    network_mode: service:tailscale
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./caddy-config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+#    read_only: true
+    tmpfs:
+      - /tmp
+#      - /run:exec
+
+networks:
+  external:
+    name: app-external
+    driver: bridge
+#  internal:
+#    name: app-internal
+#    driver: bridge
+#    internal: true
+
+volumes:
+  caddy_data:
+  caddy_config:
