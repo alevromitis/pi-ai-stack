@@ -199,13 +199,22 @@ services:
       - /tmp
 
 networks:
+  # Explicit subnets: rpi's default Docker address pools are exhausted (31
+  # networks; see README "Points for improvement"). 10.89.0.0/16 is unused
+  # on the host, LAN and tailnet.
   external:
     name: librechat-external
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.89.10.0/24
   internal:
     name: librechat-internal
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 10.89.11.0/24
   litert:
     # Owned by litert-lm stack. Declared external so we join it (not duplicate).
     name: ${LITERT_NETWORK:-litert-lm-external}
