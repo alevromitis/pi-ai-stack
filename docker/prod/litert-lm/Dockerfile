@@ -46,7 +46,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # native OpenAI-compatible server) inside an isolated venv.
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir --upgrade litert-lm
+    && /opt/venv/bin/pip install --no-cache-dir litert-lm==0.17.1
+
+# `serve` never passes enable_ynnpack to the Engine (only `run`/`benchmark`
+# have --enable-ynnpack, and config.json ignores the key), so patch it in.
+# Fails the build if upstream changes the line this anchors on.
+RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve_util.py')" \
+    && sed -i 's/^\( *\)use_ringbuffers_local_attention=True,$/&\n\1enable_ynnpack=True,/' "$f" \
+    && grep -q 'enable_ynnpack=True' "$f"
 
 WORKDIR /app
 COPY config/config.json.template /app/config.json.template

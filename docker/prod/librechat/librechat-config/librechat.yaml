@@ -1,0 +1,128 @@
+# LibreChat application config.
+# Docs: https://www.librechat.ai/docs/configuration/librechat_yaml
+#
+# Schema v1.3.13 for LibreChat v0.8.7 (see TAG in .env). Bump with image tag.
+version: 1.3.13
+cache: true
+
+endpoints:
+  custom:
+    # LiteRT-LM's `serve` command (litert-lm 0.17) exposes an OpenAI-compatible
+    # server on 0.0.0.0:9379:
+    #   GET  /v1/models            -> feeds models.fetch below
+    #   POST /v1/chat/completions  -> streaming, tools/tool_calls (incl. streamed)
+    #   POST /v1/embeddings        -> present, unused (no rag_api here)
+    # Tool calling is what lets agents and MCP servers use this endpoint.
+    - name: 'LiteRT-LM'
+      # From .env.librechat. Missing vars fail with "Missing API Key/Base URL".
+      apiKey: '${LITERT_LM_API_KEY}'
+      baseURL: '${LITERT_LM_BASE_URL}'
+      models:
+        # Fetched from GET /v1/models. `default` is fallback (required non-empty).
+        fetch: true
+        default:
+          - 'gemma4-e2b'
+      # Titles via same chat-completions route. 'current_model' avoids pinning non-existent name.
+      titleConvo: true
+      titleModel: 'current_model'
+      # One CPU-bound model on the Pi: generate the title after the reply, not
+      # alongside it, so the two requests don't compete for cores and RAM.
+      titleTiming: 'final'
+      modelDisplayLabel: 'LiteRT-LM'
+      # Server-side context is 8192 tokens (LITERT_MAX_NUM_TOKENS). A fetched
+      # web page easily exceeds that, so cap each tool result (~2k tokens).
+      maxToolResultChars: 8000
+      dropParams:
+        - 'user'
+        - 'presence_penalty'
+        - 'frequency_penalty'
+        - 'stop'
+
+  # NOTE on SSRF: LibreChat validates baseURLs against a private-address block
+  # only when the URL is user-supplied (`baseURL: 'user_provided'`). The
+  # admin-configured baseURL above is not subject to it, so no exemption is
+  # needed. If you ever switch this endpoint to user_provided, add:
+  # allowedAddresses:
+  #   - 'litert-lm-1:9379'
+
+# Web search for agents/chat. LibreChat's built-in webSearch can't be used:
+# v0.8.7 (and v0.8.8) refuse to enable it without a scraper (Firecrawl, Serper
+# or Tavily) - external APIs, or a multi-container Firecrawl too heavy for the
+# Pi. mcp-searxng gives the model `searxng_web_search` + `web_url_read`
+# against our own SearXNG instead. Spawned over stdio inside the librechat
+# container; SEARXNG_URL is set in the compose file (searxng-external network).
+# Needs `json` in SearXNG's search.formats (host settings.yml, see README).
+mcpServers:
+  searxng:
+    type: stdio
+    command: npx
+    args:
+      - '-y'
+      - 'mcp-searxng@2.5.0'
+    env:
+      SEARXNG_URL: '${SEARXNG_URL}'
+    # First start downloads the package from npm.
+    initTimeout: 120000
+    # A search or page read can be slow from the Pi.
+    timeout: 60000
+
+  # The agent-tools stack: one sandboxed container per server, on the
+  # internal-only agent-tools-internal network (see its compose file).
+  # Shell and filesystem have no network and see only /workspace.
+  shell:
+    type: streamable-http
+    url: 'http://mcp-shell-1:8000/mcp'
+    title: 'Sandbox Shell'
+    description: 'Allowlisted commands in /workspace; no network.'
+    timeout: 130000
+  filesystem:
+    type: streamable-http
+    url: 'http://mcp-filesystem-1:8000/mcp'
+    title: 'Workspace Files'
+    description: 'Read and write files in the shared agent workspace.'
+  playwright:
+    type: streamable-http
+    url: 'http://mcp-playwright-1:8931/mcp'
+    title: 'Playwright Browser'
+    description: 'Headless Chromium for pages that need JavaScript or clicks.'
+    initTimeout: 60000
+    timeout: 120000
+
+mcpSettings:
+  # LibreChat blocks MCP URLs that resolve to private addresses unless
+  # listed here (host:port, exact).
+  allowedAddresses:
+    - 'mcp-shell-1:8000'
+    - 'mcp-filesystem-1:8000'
+    - 'mcp-playwright-1:8931'
+
+interface:
+  # OpenAI-compatible agents API (/api/agents/v1/chat/completions) with
+  # LibreChat API keys - how n8n runs agents in the background.
+  remoteAgents:
+    use: true
+    create: true
+
+modelSpecs:
+  # Leave the plain endpoint/model picker available next to this spec.
+  prioritize: false
+  list:
+    - name: 'pi-agent'
+      label: 'Pi agent (Gemma 4 E2B + web)'
+      description: 'Local model on rpi: SearXNG search, page reading, sandbox shell.'
+      default: true
+      # Tool definitions eat the 6144-token budget: searxng + shell are
+      # ~0.8k tokens; filesystem (~2k) and playwright (~4.3k) are left to
+      # agents that tick only the tools they need.
+      mcpServers:
+        - 'searxng'
+        - 'shell'
+      preset:
+        endpoint: 'LiteRT-LM'
+        model: 'gemma4-e2b'
+        # LibreChat maps any "gemma*" model to 32k context and would send
+        # prompts LiteRT-LM rejects (500) above 8192. Input + output must fit:
+        # 6144 + 1024, leaving headroom for tokenizer mismatch (LibreChat
+        # counts with tiktoken, not Gemma's tokenizer).
+        maxContextTokens: 6144
+        max_tokens: 1024
