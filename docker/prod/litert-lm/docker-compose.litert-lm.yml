@@ -42,10 +42,10 @@ services:
       - "${APP_PORT:-9379}:${APP_CONTAINER_PORT:-9379}"
     networks:
       - external
-    mem_limit: "${LITERT_MEM_LIMIT:-6g}"
+    mem_limit: "${LITERT_MEM_LIMIT:-7g}"
     mem_reservation: "${LITERT_MEM_RESERVATION:-4g}"
     # Equal to mem_limit = no extra swap allowed for this container at all.
-    memswap_limit: "${LITERT_MEM_LIMIT:-6g}"
+    memswap_limit: "${LITERT_MEM_LIMIT:-7g}"
 
 volumes:
   litert-registry:
