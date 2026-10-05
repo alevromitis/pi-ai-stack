@@ -29,7 +29,7 @@ endpoints:
       # alongside it, so the two requests don't compete for cores and RAM.
       titleTiming: 'final'
       modelDisplayLabel: 'LiteRT-LM'
-      # Server-side context is 8192 tokens (LITERT_MAX_NUM_TOKENS). A fetched
+      # Server-side context is 12288 tokens (LITERT_MAX_NUM_TOKENS). A fetched
       # web page easily exceeds that, so cap each tool result (~2k tokens).
       maxToolResultChars: 8000
       dropParams:
@@ -111,7 +111,7 @@ modelSpecs:
       label: 'Pi agent (Gemma 4 E2B + web)'
       description: 'Local model on rpi: SearXNG search, page reading, sandbox shell.'
       default: true
-      # Tool definitions eat the 6144-token budget: searxng + shell are
+      # Tool definitions eat the 10240-token budget: searxng + shell are
       # ~0.8k tokens; filesystem (~2k) and playwright (~4.3k) are left to
       # agents that tick only the tools they need.
       mcpServers:
@@ -121,8 +121,8 @@ modelSpecs:
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
         # LibreChat maps any "gemma*" model to 32k context and would send
-        # prompts LiteRT-LM rejects (500) above 8192. Input + output must fit:
-        # 6144 + 1024, leaving headroom for tokenizer mismatch (LibreChat
+        # prompts LiteRT-LM rejects (500) above 12288. Input + output must fit:
+        # 10240 + 1024, leaving headroom for tokenizer mismatch (LibreChat
         # counts with tiktoken, not Gemma's tokenizer).
-        maxContextTokens: 6144
+        maxContextTokens: 10240
         max_tokens: 1024
