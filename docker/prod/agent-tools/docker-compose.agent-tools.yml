@@ -52,9 +52,10 @@ services:
       - --healthEndpoint
       - /healthz
     environment:
-      # argv only, no shell string. python3 makes this effectively "run any
-      # code" - the container (no network, /workspace only, limits) is the
-      # real boundary, as mcp-shell-server's README requires.
+      # argv only, no shell string; interpreters are refused by the server's
+      # own policy. Its README still requires an external boundary for
+      # untrusted input: that is this container (no network, /workspace
+      # only, limits).
       ALLOW_COMMANDS: "${SHELL_ALLOW_COMMANDS:?set SHELL_ALLOW_COMMANDS in .env}"
       MCP_SHELL_DEFAULT_TIMEOUT_SECONDS: "30"
       MCP_SHELL_MAX_TIMEOUT_SECONDS: "120"
