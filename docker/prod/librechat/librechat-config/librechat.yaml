@@ -72,18 +72,18 @@ mcpServers:
   shell:
     type: streamable-http
     url: 'http://mcp-shell-1:8000/mcp'
-    title: 'Shell (sandbox)'
+    title: 'Sandbox Shell'
     description: 'Allowlisted commands in /workspace; no network.'
     timeout: 130000
   filesystem:
     type: streamable-http
     url: 'http://mcp-filesystem-1:8000/mcp'
-    title: 'Files (/workspace)'
+    title: 'Workspace Files'
     description: 'Read and write files in the shared agent workspace.'
   playwright:
     type: streamable-http
     url: 'http://mcp-playwright-1:8931/mcp'
-    title: 'Browser (Playwright)'
+    title: 'Playwright Browser'
     description: 'Headless Chromium for pages that need JavaScript or clicks.'
     initTimeout: 60000
     timeout: 120000
