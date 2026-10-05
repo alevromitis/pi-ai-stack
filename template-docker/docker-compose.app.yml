@@ -1,0 +1,80 @@
+name: app
+
+services:
+  app:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#      target: production
+    image: app:${TAG:-latest}
+    container_name: app-1
+    restart: unless-stopped
+    user: "1000:1000"
+#    privileged: "true"
+#    command: ""
+    security_opt:
+      - "no-new-privileges:true"
+#    links:
+#      - container
+#    cap_add:
+#      - rule
+#    labels:
+#      - "traefik.enable=false"
+#    environment:
+#      NODE_ENV: production
+#      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+#      REDIS_URL: redis://cache:6379
+    env_file:
+      # .env is auto-loaded for interpolation in ports:/volumes (env_file alone doesn't).
+      - .env
+      - .env.app
+    ports:
+      - "${APP_PORT:-3000}:${APP_CONTAINER_PORT:-3000}"
+#    depends_on:
+#      db:
+#        condition: service_healthy
+#      cache:
+#        condition: service_healthy
+    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: []
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "1.0"
+#          memory: 512M
+#        reservations:
+#          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - external
+#      - internal
+#    dns:
+#      - ""
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${APP_DATA_DIR:?set APP_DATA_DIR in .env}:/app/data
+#      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+#    devices:
+#      - "/dev/null"
+#    read_only: true
+    tmpfs:
+      - /tmp
+#      - /run:exec
+
+networks:
+  external:
+    name: app-external
+    driver: bridge
+#  internal:
+#    name: app-internal
+#    driver: bridge
+#    internal: true
