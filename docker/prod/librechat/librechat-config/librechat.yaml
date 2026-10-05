@@ -109,10 +109,14 @@ modelSpecs:
   list:
     - name: 'pi-agent'
       label: 'Pi agent (Gemma 4 E2B + web)'
-      description: 'Local model on rpi with SearXNG search and page reading.'
+      description: 'Local model on rpi: SearXNG search, page reading, sandbox shell.'
       default: true
+      # Tool definitions eat the 6144-token budget: searxng + shell are
+      # ~0.8k tokens; filesystem (~2k) and playwright (~4.3k) are left to
+      # agents that tick only the tools they need.
       mcpServers:
         - 'searxng'
+        - 'shell'
       preset:
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
