@@ -22,6 +22,8 @@ endpoints:
         fetch: true
         default:
           - 'gemma4-e2b'
+          # Off for now (~3x slower on the Pi); see litert-lm/.env.example.
+          # - 'gemma4-e4b'
       # Titles via same chat-completions route. 'current_model' avoids pinning non-existent name.
       titleConvo: true
       titleModel: 'current_model'
