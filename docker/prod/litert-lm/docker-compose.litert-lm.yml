@@ -30,6 +30,9 @@ services:
       # Bigger = handles longer chats/system prompts, but costs more RAM for
       # the KV cache — watch memory if you raise this much further.
       LITERT_MAX_NUM_TOKENS: "${LITERT_MAX_NUM_TOKENS:-8192}"
+      # 1 = reuse the last conversation's KV cache (patches/prefix_cache.py),
+      # 0 = upstream behaviour (full prefill on every request).
+      LITERT_PREFIX_CACHE: "${LITERT_PREFIX_CACHE:-1}"
       # Required by LiteRT to opt in to the experimental V3DV/WebGPU path.
 #      V3D_WEBGPU_OVERRIDE: "1"
     env_file:
