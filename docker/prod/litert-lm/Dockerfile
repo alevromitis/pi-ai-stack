@@ -48,12 +48,9 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir litert-lm==0.17.1
 
-# `serve` never passes enable_ynnpack to the Engine (only `run`/`benchmark`
-# have --enable-ynnpack, and config.json ignores the key), so patch it in.
-# Fails the build if upstream changes the line this anchors on.
-RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve_util.py')" \
-    && sed -i 's/^\( *\)use_ringbuffers_local_attention=True,$/&\n\1enable_ynnpack=True,/' "$f" \
-    && grep -q 'enable_ynnpack=True' "$f"
+# CPU inference uses LiteRT's default XNNPACK delegate. YNNPACK (via a patch
+# to serve_util.py) was dropped 2026-10-07: benchmarked on the Pi (Gemma 4 E4B) it gave no
+# speedup, but took 28 s instead of 1.5 s to load and used more RAM.
 
 # Prefix (KV) cache: upstream re-prefills the whole chat on every request;
 # patches/prefix_cache.py keeps the last conversation and prefills only the
