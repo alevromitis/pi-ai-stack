@@ -131,6 +131,20 @@ interface:
     use: true
     create: true
 
+fileConfig:
+  # "Upload as Text" accepts any MIME type by default and reads binaries
+  # (images, audio, archives) as raw bytes - a 38 KB webp became ~29k tokens
+  # and overflowed the context. Allow only text and formats LibreChat's
+  # built-in parser understands (pdf, docx, odt, xlsx/xls, ods).
+  text:
+    supportedMimeTypes:
+      - '^text\/.+$'
+      - '^application\/(json|ld\+json|xml|yaml|x-yaml|toml|sql|x-sh|javascript|typescript|x-httpd-php|x-tex|x-subrip)$'
+      - '^application\/pdf$'
+      - '^application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)$'
+      - '^application\/vnd\.oasis\.opendocument\.(text|spreadsheet)$'
+      - '^application\/(vnd\.ms-excel|msexcel|x-msexcel|x-ms-excel|x-excel|x-dos_ms_excel|xls|x-xls)$'
+
 modelSpecs:
   # One spec per task, each attaching only the MCP servers it needs: every
   # attached tool's schema is re-sent (and re-prefilled on the Pi's CPU, ~2
