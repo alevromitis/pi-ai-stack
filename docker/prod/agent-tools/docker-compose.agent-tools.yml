@@ -8,12 +8,15 @@ name: agent-tools
 #   internal  agent-tools-internal (internal: true). LibreChat joins it as
 #             external. Shell and filesystem live ONLY here: no internet,
 #             no LAN, no host - an injected prompt can't exfiltrate or pivot.
-#   egress    agent-tools-egress. Playwright's browser needs the internet.
-#             Docker NAT also reaches the LAN; see README "Agent tools".
+#   egress    agent-tools-egress. Playwright's browser and mcp-searxng's
+#             page reader need the internet. Docker NAT also reaches the
+#             LAN; see README "Agent tools".
+#   searxng   searxng-external (owned by the searxng stack, must be up).
 #
 #   mcp-shell       :8000  allowlisted commands, cwd /workspace
 #   mcp-filesystem  :8000  read/write confined to /workspace
 #   mcp-playwright  :8931  headless Chromium; files to /workspace/playwright
+#   mcp-searxng     :8080  web search via searxng-1 + web_url_read (no workspace)
 #
 # All three share ${AGENT_WORKSPACE_DIR} as /workspace (uid 1000), the only
 # host path any of them can touch.
@@ -159,6 +162,46 @@ services:
     volumes:
       - ${AGENT_WORKSPACE_DIR:?set AGENT_WORKSPACE_DIR in .env}:/workspace
 
+  mcp-searxng:
+    <<: *sandbox
+    # Pinned (TAG in .env). Was an npx child of librechat-1; here it fetches
+    # untrusted pages without sharing a container with LibreChat's secrets.
+    image: docker.io/isokoliuk/mcp-searxng:${MCP_SEARXNG_TAG:?set MCP_SEARXNG_TAG in .env}
+    container_name: mcp-searxng-1
+    environment:
+      SEARXNG_URL: http://searxng-1:8080
+      MCP_HTTP_PORT: "8080"
+      MCP_HTTP_HOST: 0.0.0.0
+      # Exact Host header LibreChat sends (DNS-rebinding allowlist).
+      MCP_HTTP_ALLOWED_HOSTS: mcp-searxng-1:8080
+      # Small-context tuning (see README "Agent tools"): minimal tool
+      # schemas, few short results, pages capped at ~1.5k tokens.
+      SEARXNG_LITE_TOOLS: "true"
+      SEARXNG_MAX_RESULTS: "5"
+      SEARXNG_MAX_RESULT_CHARS: "300"
+      URL_READ_MAX_CHARS: "6000"
+      # DuckDuckGo CAPTCHAs the all-languages region; matches searxng default_lang.
+      SEARXNG_DEFAULT_LANGUAGE: en
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+          pids: 64
+    networks:
+      egress:
+        priority: 100
+      internal:
+        priority: 50
+      searxng:
+        priority: 10
+
 networks:
   internal:
     name: agent-tools-internal
@@ -167,3 +210,7 @@ networks:
   egress:
     name: agent-tools-egress
     driver: bridge
+  searxng:
+    # Owned by searxng stack. Declared external so we join it (not duplicate).
+    name: ${SEARXNG_NETWORK:-searxng-external}
+    external: true

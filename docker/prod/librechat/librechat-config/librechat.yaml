@@ -49,26 +49,18 @@ endpoints:
 # v0.8.7 (and v0.8.8) refuse to enable it without a scraper (Firecrawl, Serper
 # or Tavily) - external APIs, or a multi-container Firecrawl too heavy for the
 # Pi. mcp-searxng gives the model `searxng_web_search` + `web_url_read`
-# against our own SearXNG instead. Spawned over stdio inside the librechat
-# container; SEARXNG_URL is set in the compose file (searxng-external network).
-# Needs `json` in SearXNG's search.formats (host settings.yml, see README).
+# against our own SearXNG instead.
 mcpServers:
+  # The agent-tools stack: one sandboxed container per server, reached over
+  # agent-tools-internal (see its compose file). Shell and filesystem have
+  # no network and see only /workspace.
   searxng:
-    type: stdio
-    command: npx
-    args:
-      - '-y'
-      - 'mcp-searxng@2.5.0'
-    env:
-      SEARXNG_URL: '${SEARXNG_URL}'
-    # First start downloads the package from npm.
-    initTimeout: 120000
+    type: streamable-http
+    url: 'http://mcp-searxng-1:8080/mcp'
+    title: 'Web Search'
+    description: 'SearXNG search and page reading.'
     # A search or page read can be slow from the Pi.
     timeout: 60000
-
-  # The agent-tools stack: one sandboxed container per server, on the
-  # internal-only agent-tools-internal network (see its compose file).
-  # Shell and filesystem have no network and see only /workspace.
   shell:
     type: streamable-http
     url: 'http://mcp-shell-1:8000/mcp'
@@ -92,6 +84,7 @@ mcpSettings:
   # LibreChat blocks MCP URLs that resolve to private addresses unless
   # listed here (host:port, exact).
   allowedAddresses:
+    - 'mcp-searxng-1:8080'
     - 'mcp-shell-1:8000'
     - 'mcp-filesystem-1:8000'
     - 'mcp-playwright-1:8931'
@@ -104,25 +97,40 @@ interface:
     create: true
 
 modelSpecs:
-  # Leave the plain endpoint/model picker available next to this spec.
+  # One spec per task, each attaching only the MCP servers it needs: every
+  # attached tool's schema is re-sent (and re-prefilled on the Pi's CPU, ~2
+  # min per 4k tokens) on every model call. Approximate schema cost:
+  # searxng ~0.3k (lite), shell ~0.2k, filesystem ~2k, playwright ~4.3k.
+  # Finer cuts (individual tools) need an agent built in the UI.
+  # Leave the plain endpoint/model picker available next to these specs.
   prioritize: false
   list:
     - name: 'pi-agent'
-      label: 'Pi agent (Gemma 4 E2B + web)'
-      description: 'Local model on rpi: SearXNG search, page reading, sandbox shell.'
+      label: 'Pi agent (search)'
+      description: 'Web search, page reading and a sandbox shell. Fastest.'
       default: true
-      # Tool definitions eat into the context budget: searxng + shell are
-      # ~0.8k tokens; filesystem (~2k) and playwright (~4.3k) are left to
-      # agents that tick only the tools they need.
       mcpServers:
         - 'searxng'
         - 'shell'
-      preset:
+      preset: &pi-preset
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
-        # LibreChat maps any "gemma*" model to 32k context and would send
-        # prompts LiteRT-LM rejects (500) above 32768. Input + output must fit:
-        # 28672 + 2048, leaving headroom for tokenizer mismatch (LibreChat
-        # counts with tiktoken, not Gemma's tokenizer).
+        # LibreChat maps any "gemma*" model to 32k context and counts with
+        # tiktoken, not Gemma's tokenizer. LiteRT-LM rejects (500) anything
+        # above LITERT_MAX_NUM_TOKENS=32768, so input + output = 28672 +
+        # 2048 leaves headroom for the mismatch.
         maxContextTokens: 28672
         max_tokens: 2048
+    - name: 'pi-browser'
+      label: 'Pi browser'
+      description: 'Headless Chromium for JavaScript pages, forms and clicks. Slow.'
+      mcpServers:
+        - 'playwright'
+      preset: *pi-preset
+    - name: 'pi-files'
+      label: 'Pi files'
+      description: 'Read, write and process files in the shared /workspace.'
+      mcpServers:
+        - 'filesystem'
+        - 'shell'
+      preset: *pi-preset

@@ -2,19 +2,17 @@ name: librechat
 
 # Topology
 # --------
-#   librechat    web UI + API on ${APP_PORT}:${APP_CONTAINER_PORT}, five networks:
+#   librechat    web UI + API on ${APP_PORT}:${APP_CONTAINER_PORT}, four networks:
 #                  external  default route, published-port address (see `priority`)
 #                  internal  mongodb + meilisearch, no off-host route
 #                  litert    litert-lm-external (owned by litert-lm stack)
-#                  searxng   searxng-external (owned by searxng stack), for the
-#                            mcp-searxng server LibreChat spawns over stdio
 #                  tools     agent-tools-internal (owned by agent-tools stack):
-#                            shell, filesystem and playwright MCP servers
+#                            searxng, shell, filesystem, playwright MCP servers
 #   mongodb      conversation/user store, `internal` only, --noauth, unreachable off-host
 #   meilisearch  conversation search index, `internal` only
 #
-# Model provider (litert-lm-1:9379), search (searxng-1:8080) and the MCP
-# tool servers (agent-tools) are external. Those stacks must be up first.
+# Model provider (litert-lm-1:9379) and the MCP tool servers (agent-tools,
+# incl. search) are external. Those stacks must be up first.
 # Upstream: https://github.com/danny-avila/LibreChat/blob/v0.8.7/docker-compose.yml
 # Divergences: env_file (not bind-mount), no rag_api/vectordb (no RAM to spare on rpi),
 # no admin-panel/nginx, split internal/external networks
@@ -53,8 +51,6 @@ services:
       MEILI_HOST: http://librechat-meilisearch-1:7700
       SEARCH: "true"
       CONFIG_PATH: /app/librechat.yaml
-      # Read by the mcp-searxng server (librechat.yaml mcpServers) over searxng-external.
-      SEARXNG_URL: http://searxng-1:8080
     env_file:
       # .env is auto-loaded for interpolation in ports:/volumes (env_file doesn't).
       - .env
@@ -94,8 +90,6 @@ services:
         priority: 50
       litert:
         priority: 10
-      searxng:
-        priority: 5
       tools:
         priority: 1
 #    dns:
@@ -218,10 +212,6 @@ networks:
   litert:
     # Owned by litert-lm stack. Declared external so we join it (not duplicate).
     name: ${LITERT_NETWORK:-litert-lm-external}
-    external: true
-  searxng:
-    # Owned by searxng stack. Declared external so we join it (not duplicate).
-    name: ${SEARXNG_NETWORK:-searxng-external}
     external: true
   tools:
     # Owned by agent-tools stack (internal: true). Declared external so we join it.
