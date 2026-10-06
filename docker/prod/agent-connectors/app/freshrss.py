@@ -16,6 +16,7 @@ from common import (
     TZ,
     clip,
     env,
+    env_flag,
     env_int,
     html_to_text,
     new_server,
@@ -24,6 +25,7 @@ from common import (
     serve,
     tool,
 )
+from pages import page_text
 
 API = env("FRESHRSS_URL").rstrip("/") + "/api/greader.php"
 USER = env("FRESHRSS_USER")
@@ -31,6 +33,8 @@ PASSWORD = env("FRESHRSS_API_PASSWORD")
 SNIPPET_CHARS = env_int("FRESHRSS_SNIPPET_CHARS", 200)
 READ_MAX_CHARS = env_int("FRESHRSS_READ_MAX_CHARS", 6000)
 MAX_ITEMS = 20
+# Feeds with only a title: rss_read fetches the item's page and its PDFs.
+FETCH_PAGES = env_flag("FRESHRSS_FETCH_PAGES", True)
 
 READ = "user/-/state/com.google/read"
 STARRED = "user/-/state/com.google/starred"
@@ -127,7 +131,7 @@ def _feed(item: dict) -> str:
 def _link(item: dict) -> str:
     for key in ("canonical", "alternate"):
         if item.get(key):
-            return item[key][0].get("href", "")
+            return html.unescape(item[key][0].get("href", ""))
     return ""
 
 
@@ -214,6 +218,9 @@ async def rss_read(id: str) -> str:
         raise ToolError(f"No item {id}.")
     item = items[0]
     body = html_to_text(item.get("summary", {}).get("content", ""))
+    if len(body) < 200 and FETCH_PAGES and _link(item):
+        page = await page_text(_link(item), READ_MAX_CHARS)
+        body = "\n\n".join(p for p in (body, "(The feed has little text; from the linked page:)", page) if p)
     state = "read" if READ in item.get("categories", []) else "unread"
     return "\n".join(
         [
@@ -221,7 +228,7 @@ async def rss_read(id: str) -> str:
             f"Feed: {_feed(item)} · {_stamp(item)} · {state}",
             f"Link: {_link(item)}",
             "",
-            clip(body, READ_MAX_CHARS) or "(no content in the feed; open the link)",
+            clip(body, READ_MAX_CHARS) or "(no content in the feed)",
         ]
     )
 

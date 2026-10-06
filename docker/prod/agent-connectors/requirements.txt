@@ -5,6 +5,8 @@ mcp==2.3.0
 httpx==0.28.1
 icalendar==7.3.0
 uvicorn==0.54.0
+# rss_read: text of PDFs attached to title-only feed items.
+pypdf==6.19.0
 # zoneinfo reads only this (PYTHONTZPATH is empty in the image): a pinned,
 # complete tz database, so generated VTIMEZONEs carry every DST transition.
 tzdata==2026.5
