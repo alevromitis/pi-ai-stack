@@ -97,6 +97,10 @@ services:
       - streamableHttp
       - --port
       - "8000"
+      # One long-lived child per session. Stateless mode spawns a Node child
+      # per request; LibreChat's parallel connects pushed several past the
+      # memory limit ("Aborted (core dumped)").
+      - --stateful
       - --healthEndpoint
       - /healthz
     healthcheck: *mcp-health
@@ -104,8 +108,8 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
-          pids: 64
+          memory: 512M
+          pids: 128
     networks:
       - internal
     volumes:
