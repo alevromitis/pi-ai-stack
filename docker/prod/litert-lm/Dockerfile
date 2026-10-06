@@ -55,6 +55,15 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve_util.py')" \
     && sed -i 's/^\( *\)use_ringbuffers_local_attention=True,$/&\n\1enable_ynnpack=True,/' "$f" \
     && grep -q 'enable_ynnpack=True' "$f"
 
+# Prefix (KV) cache: upstream re-prefills the whole chat on every request;
+# patches/prefix_cache.py keeps the last conversation and prefills only the
+# new messages. Also honours `max_tokens`. Fails the build on upstream drift.
+COPY patches/ /tmp/patches/
+RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/openai_handler.py')" \
+    && cp /tmp/patches/prefix_cache.py "$(dirname "$f")/" \
+    && python3 /tmp/patches/apply_prefix_cache.py "$f" \
+    && rm -rf /tmp/patches
+
 WORKDIR /app
 COPY config/config.json.template /app/config.json.template
 COPY entrypoint.sh /app/entrypoint.sh
