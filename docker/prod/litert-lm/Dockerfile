@@ -50,9 +50,10 @@ RUN python3 -m venv /opt/venv \
 
 # `serve` never passes enable_ynnpack to the Engine (only `run`/`benchmark`
 # have --enable-ynnpack, and config.json ignores the key), so patch it in.
-# Not for speed (no gain over XNNPACK in a 2026-10-07 benchmark) but memory:
-# under XNNPACK, gemma4-e2b is OOM-killed at max_num_tokens 16384 and up
-# (7 GB cap); YNNPACK serves 32768 in ~4.6 GB.
+# Benchmarked 2026-10-07 (1024 prefill / 256 decode, 4 threads): gemma4-e2b
+# prefill 148 vs 103 tok/s, decode 9.1 vs 8.5 over XNNPACK (gemma4-e4b: no
+# gain). It is also what fits the context: under XNNPACK gemma4-e2b is
+# OOM-killed at max_num_tokens >= 16384 (7 GB cap); YNNPACK serves 32768.
 # Fails the build if upstream changes the line this anchors on.
 RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve_util.py')" \
     && sed -i 's/^\( *\)use_ringbuffers_local_attention=True,$/&\n\1enable_ynnpack=True,/' "$f" \
