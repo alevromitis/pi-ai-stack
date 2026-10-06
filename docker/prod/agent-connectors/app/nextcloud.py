@@ -25,7 +25,7 @@ from urllib.parse import quote
 from xml.sax.saxutils import escape
 
 import httpx
-from icalendar import Calendar, Event, Todo
+from icalendar import Alarm, Calendar, Event, Todo, vDuration
 from mcp.server.mcpserver.exceptions import ToolError
 
 from common import (
@@ -56,6 +56,11 @@ HOST = os.environ.get("NEXTCLOUD_HOST", "")
 DEFAULT_CALENDAR = os.environ.get("NEXTCLOUD_DEFAULT_CALENDAR", "")
 DEFAULT_TASK_LIST = os.environ.get("NEXTCLOUD_DEFAULT_TASK_LIST", "")
 NOTE_MAX_CHARS = env_int("NEXTCLOUD_NOTE_MAX_CHARS", 8000)
+# New events copy the house style of the user's own calendar: CONFIRMED, a
+# DISPLAY reminder whose text is the title, all-day events TRANSPARENT.
+# The reminder offset is an iCalendar duration; empty means no reminder.
+_ALARM = os.environ.get("NEXTCLOUD_EVENT_ALARM", "-PT10M").strip()
+EVENT_ALARM = vDuration.from_ical(_ALARM) if _ALARM else None
 MAX_LISTED = 80
 
 _headers = {"User-Agent": "agent-connectors", "OCS-APIRequest": "true"}
@@ -491,6 +496,15 @@ async def event_add(
     event.add("SUMMARY", title.strip())
     event.add("DTSTART", begin)
     event.add("DTEND", finish)
+    event.add("STATUS", "CONFIRMED")
+    if not isinstance(begin, datetime):
+        event.add("TRANSP", "TRANSPARENT")
+    if EVENT_ALARM is not None:
+        alarm = Alarm()
+        alarm.add("ACTION", "DISPLAY")
+        alarm.add("DESCRIPTION", title.strip())
+        alarm.add("TRIGGER", EVENT_ALARM)
+        event.add_component(alarm)
     if location.strip():
         event.add("LOCATION", location.strip())
     if notes.strip() or link:

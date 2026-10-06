@@ -163,10 +163,13 @@ async def rss_feeds() -> str:
 
 
 @tool(mcp, service="FreshRSS")
-async def rss_items(source: str = "", unread_only: bool = True, starred: bool = False, limit: int = 10) -> str:
+async def rss_items(
+    source: str = "", unread_only: bool = True, starred: bool = False, limit: int = 10, hours: int = 0
+) -> str:
     """List RSS items, newest first, with ids for rss_read/rss_mark.
 
     source: a category or feed name; empty for all. starred: only starred items.
+    hours: only items from the last N hours (0 = any age).
     """
     limit = max(1, min(limit, MAX_ITEMS))
     if starred:
@@ -176,6 +179,9 @@ async def rss_items(source: str = "", unread_only: bool = True, starred: bool = 
     params = {"n": str(limit)}
     if unread_only and not starred:
         params["xt"] = READ
+    if hours > 0:
+        # FreshRSS reads ot as "published or modified since" (unix seconds).
+        params["ot"] = str(int(time.time()) - hours * 3600)
     data = await reader.get(f"stream/contents/{quote(stream, safe='/')}", **params)
     items = data.get("items", [])
     if not items:
