@@ -1,0 +1,10 @@
+# Direct dependencies, pinned; bump deliberately and re-run the checks in
+# README "agent-connectors". mcp 2.x serves the 2025-era protocol versions
+# LibreChat's TS SDK (1.29) speaks, verified 2026-10-07.
+mcp==2.3.0
+httpx==0.28.1
+icalendar==7.3.0
+uvicorn==0.54.0
+# zoneinfo reads only this (PYTHONTZPATH is empty in the image): a pinned,
+# complete tz database, so generated VTIMEZONEs carry every DST transition.
+tzdata==2026.5

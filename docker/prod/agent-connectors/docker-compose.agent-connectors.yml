@@ -1,0 +1,112 @@
+name: agent-connectors
+
+# Topology
+# --------
+#   MCP servers that reach the user's own data (FreshRSS, Nextcloud) for
+#   LibreChat agents, over Streamable HTTP. Nothing is published on the host.
+#
+#   connectors  agent-connectors-internal (internal: true). LibreChat joins
+#               it as external. Deliberately NOT agent-tools-internal: the
+#               shell, filesystem and browser containers there handle
+#               untrusted input and must not reach credentialed servers.
+#   freshrss    freshrss-external (owned by the freshrss stack, must be up).
+#   nextcloud   nextcloud-aio (owned by Nextcloud AIO's mastercontainer).
+#
+#   mcp-freshrss   :8000  /freshrss/mcp                         -> freshrss-1:80
+#   mcp-nextcloud  :8000  /calendar/mcp /tasks/mcp /notes/mcp   -> nextcloud-aio-apache:11000
+#                         /calendar-add/mcp (list + add only, for feed agents)
+#
+# Each container holds only its own service's credential (an API / app
+# password from .env.<service>) and sees only that service's network.
+
+x-connector: &connector
+  restart: unless-stopped
+  user: "1000:1000"
+  security_opt:
+    - "no-new-privileges:true"
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 10s
+  deploy:
+    resources:
+      limits:
+        cpus: "0.5"
+        memory: 128M
+        pids: 64
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  mcp-freshrss:
+    <<: *connector
+    build:
+      context: ./
+    image: agent-connectors-mcp:local
+    container_name: mcp-freshrss-1
+    command: ["python", "freshrss.py"]
+    env_file:
+      - .env.mcp-freshrss
+    environment:
+      FRESHRSS_URL: http://freshrss-1:80
+      # Exact Host header LibreChat sends (DNS-rebinding allowlist).
+      MCP_ALLOWED_HOSTS: mcp-freshrss-1:8000
+      TZ: ${TZ:-UTC}
+    networks:
+      freshrss:
+        priority: 100
+      connectors:
+        priority: 50
+
+  mcp-nextcloud:
+    <<: *connector
+    image: agent-connectors-mcp:local
+    container_name: mcp-nextcloud-1
+    depends_on:
+      # Shares mcp-freshrss's image; let that service build it first.
+      mcp-freshrss:
+        condition: service_started
+    command: ["python", "nextcloud.py"]
+    env_file:
+      - .env.mcp-nextcloud
+    environment:
+      # AIO's apache container, plain HTTP inside nextcloud-aio. Its Caddy
+      # routes on the Host header, so NEXTCLOUD_HOST (.env.mcp-nextcloud)
+      # must be the instance's domain (NC_DOMAIN).
+      NEXTCLOUD_URL: http://nextcloud-aio-apache:11000
+      MCP_ALLOWED_HOSTS: mcp-nextcloud-1:8000
+      TZ: ${TZ:-UTC}
+    networks:
+      nextcloud:
+        priority: 100
+      connectors:
+        priority: 50
+
+networks:
+  connectors:
+    name: agent-connectors-internal
+    driver: bridge
+    internal: true
+    # Explicit subnet: rpi's default address pools are nearly exhausted (see
+    # README "Points for improvement"); librechat uses 10.89.10-11.0/24.
+    ipam:
+      config:
+        - subnet: 10.89.20.0/24
+  freshrss:
+    # Owned by the freshrss stack. Declared external so we join it.
+    name: ${FRESHRSS_NETWORK:-freshrss-external}
+    external: true
+  nextcloud:
+    # Owned by Nextcloud AIO (not in this repo). Declared external so we join it.
+    name: ${NEXTCLOUD_NETWORK:-nextcloud-aio}
+    external: true

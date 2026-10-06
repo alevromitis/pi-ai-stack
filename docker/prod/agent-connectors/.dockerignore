@@ -1,0 +1,5 @@
+# Credentials stay out of the build context; the image needs only
+# requirements.txt and app/.
+.env
+.env.*
+__pycache__/
