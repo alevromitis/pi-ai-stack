@@ -61,11 +61,14 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve_util.py')" \
 
 # Prefix (KV) cache: upstream re-prefills the whole chat on every request;
 # patches/prefix_cache.py keeps the last conversation and prefills only the
-# new messages. Also honours `max_tokens`. Fails the build on upstream drift.
+# new messages. Also honours `max_tokens`. patches/apply_reasoning.py streams
+# Gemma's thinking as reasoning_content (upstream generates and discards it).
+# Fails the build on upstream drift.
 COPY patches/ /tmp/patches/
 RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/openai_handler.py')" \
     && cp /tmp/patches/prefix_cache.py "$(dirname "$f")/" \
     && python3 /tmp/patches/apply_prefix_cache.py "$f" \
+    && python3 /tmp/patches/apply_reasoning.py "$f" \
     && rm -rf /tmp/patches
 
 WORKDIR /app
