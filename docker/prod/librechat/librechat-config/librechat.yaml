@@ -125,6 +125,12 @@ mcpSettings:
     - 'mcp-nextcloud-1:8000'
 
 interface:
+  # Any modelSpecs list silently turns these three off unless set here
+  # (packages/data-schemas/src/app/interface.ts), which hides the LiteRT-LM
+  # endpoint and leaves only the specs and Agents in the picker.
+  modelSelect: true
+  parameters: true
+  presets: true
   # OpenAI-compatible agents API (/api/agents/v1/chat/completions) with
   # LibreChat API keys - how n8n runs agents in the background.
   remoteAgents:
@@ -156,13 +162,13 @@ modelSpecs:
   # Leave the plain endpoint/model picker available next to these specs.
   prioritize: false
   list:
-    - name: 'pi-agent'
-      label: 'Pi agent (search)'
-      description: 'Web search, page reading and a sandbox shell. Fastest.'
+    # Plain LiteRT-LM chat, selected on every new chat. No tool schemas, so
+    # the fastest replies; MCP servers can still be added per chat from the
+    # input bar, or pick one of the task specs below.
+    - name: 'pi-chat'
+      label: 'LiteRT-LM'
+      description: 'Plain chat with the local model. Fastest; add tools from the input bar.'
       default: true
-      mcpServers:
-        - 'searxng'
-        - 'shell'
       preset: &pi-preset
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
@@ -172,6 +178,13 @@ modelSpecs:
         # 2048 leaves headroom for the mismatch.
         maxContextTokens: 28672
         max_tokens: 2048
+    - name: 'pi-agent'
+      label: 'Pi agent (search)'
+      description: 'Web search, page reading and a sandbox shell.'
+      mcpServers:
+        - 'searxng'
+        - 'shell'
+      preset: *pi-preset
     - name: 'pi-browser'
       label: 'Pi browser'
       description: 'Headless Chromium for JavaScript pages, forms and clicks. Slow.'
