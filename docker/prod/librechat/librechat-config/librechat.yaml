@@ -162,22 +162,30 @@ modelSpecs:
   # Leave the plain endpoint/model picker available next to these specs.
   prioritize: false
   list:
-    # Plain LiteRT-LM chat, selected on every new chat. No tool schemas, so
-    # the fastest replies; MCP servers can still be added per chat from the
-    # input bar, or pick one of the task specs below.
+    # Plain LiteRT-LM chat, picked for first-time users; after that new
+    # chats keep whatever was last chosen. No tool schemas, so the fastest
+    # replies; MCP servers can still be added per chat from the input bar,
+    # or pick one of the task specs below.
     - name: 'pi-chat'
       label: 'LiteRT-LM'
       description: 'Plain chat with the local model. Fastest; add tools from the input bar.'
-      default: true
+      softDefault: true
       preset: &pi-preset
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
         # LibreChat maps any "gemma*" model to 32k context and counts with
         # tiktoken, not Gemma's tokenizer. LiteRT-LM rejects (500) anything
-        # above LITERT_MAX_NUM_TOKENS=32768, so input + output = 28672 +
-        # 2048 leaves headroom for the mismatch.
-        maxContextTokens: 28672
-        max_tokens: 2048
+        # above LITERT_MAX_NUM_TOKENS=32768, so input + output = 26624 +
+        # 4096 leaves headroom for the mismatch. Output is 4096 because
+        # thought tokens count against it too.
+        maxContextTokens: 26624
+        max_tokens: 4096
+        # Turns on Gemma's thinking (any value but 'none'; LiteRT-LM has no
+        # per-effort budgets yet). Patched LiteRT-LM streams it back as
+        # reasoning_content, shown as "Thoughts". Thought tokens share the
+        # max_tokens budget and cost decode time on the Pi; set 'none' in
+        # the parameters panel for a quick answer.
+        reasoning_effort: 'medium'
     - name: 'pi-agent'
       label: 'Pi agent (search)'
       description: 'Web search, page reading and a sandbox shell.'
