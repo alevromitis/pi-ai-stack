@@ -34,6 +34,19 @@ endpoints:
       # Server-side context is 32768 tokens (LITERT_MAX_NUM_TOKENS). A fetched
       # web page easily exceeds that, so cap each tool result (~2k tokens).
       maxToolResultChars: 8000
+      # LibreChat's built-in table says gemma4 has 128k context, so chats
+      # outside the specs (plain endpoint, edited parameters) showed 128k in
+      # the context meter and trimmed history to it, past LiteRT-LM's 32768.
+      # Same window as the specs' maxContextTokens below; rates 0 (local).
+      tokenConfig:
+        'gemma4-e2b':
+          prompt: 0
+          completion: 0
+          context: 26624
+        'gemma4-e4b':
+          prompt: 0
+          completion: 0
+          context: 26624
       dropParams:
         - 'user'
         - 'presence_penalty'
@@ -173,11 +186,12 @@ modelSpecs:
       preset: &pi-preset
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
-        # LibreChat maps any "gemma*" model to 32k context and counts with
-        # tiktoken, not Gemma's tokenizer. LiteRT-LM rejects (500) anything
-        # above LITERT_MAX_NUM_TOKENS=32768, so input + output = 26624 +
-        # 4096 leaves headroom for the mismatch. Output is 4096 because
-        # thought tokens count against it too.
+        # LibreChat counts with tiktoken, not Gemma's tokenizer. LiteRT-LM
+        # rejects (500) anything above LITERT_MAX_NUM_TOKENS=32768.
+        # maxContextTokens is the whole window (LibreChat subtracts
+        # max_tokens for the reply), so history gets 22528 and 26624 leaves
+        # headroom for the tokenizer mismatch. Output is 4096 because
+        # thought tokens count against it too. Matches tokenConfig above.
         maxContextTokens: 26624
         max_tokens: 4096
         # Turns on Gemma's thinking (any value but 'none'; LiteRT-LM has no
