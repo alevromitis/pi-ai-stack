@@ -23,6 +23,11 @@ name: agent-tools
 
 x-sandbox: &sandbox
   restart: unless-stopped
+  # tini as PID 1. supergateway runs each server via `sh -c`; when it kills
+  # the shell, the server is re-parented to PID 1, and node never reaps it.
+  # mcp-shell hit its 128-pid limit with 112 zombies ("can't start new
+  # thread") after ~2 days.
+  init: true
   user: "1000:1000"
   security_opt:
     - "no-new-privileges:true"
@@ -120,7 +125,6 @@ services:
     # Upstream publishes only :latest; pinned by digest so watchtower leaves it.
     image: mcr.microsoft.com/playwright/mcp@${PLAYWRIGHT_MCP_DIGEST:?set PLAYWRIGHT_MCP_DIGEST in .env}
     container_name: mcp-playwright-1
-    init: true
     entrypoint: ["node", "/app/cli.js"]
     command:
       - --headless
