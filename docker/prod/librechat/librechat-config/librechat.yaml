@@ -29,6 +29,12 @@ endpoints:
       # so it doesn't evict the cache mid-turn or compete for the Pi's CPU.
       titleTiming: 'final'
       modelDisplayLabel: 'LiteRT-LM'
+      # Google's recommended Gemma sampling is temperature 1.0, top_p 0.95,
+      # top_k 64. The model file sets no sampler defaults (`litert-lm
+      # describe`). The parameters panel has no top_k, so it is added to
+      # every request here; temperature/top_p are set per preset or spec.
+      addParams:
+        top_k: 64
       # LibreChat's built-in table says gemma4 has 128k context, so chats
       # outside the specs (plain endpoint, edited parameters) showed 128k in
       # the context meter and trimmed history to it, past LiteRT-LM's 16384.
