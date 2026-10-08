@@ -7,7 +7,7 @@ cache: true
 
 endpoints:
   custom:
-    # LiteRT-LM's `serve` command (litert-lm 0.17) exposes an OpenAI-compatible
+    # LiteRT-LM's `serve` command (litert-lm 0.18) exposes an OpenAI-compatible
     # server on 0.0.0.0:9379 (GET /v1/models, POST /v1/chat/completions,
     # with tool calls - what lets MCP servers use this endpoint).
     - name: 'LiteRT-LM'
@@ -211,9 +211,11 @@ modelSpecs:
           - If the question is unclear, ask one short clarifying question instead of guessing.
 
           Facts and honesty:
-          - Your knowledge is limited and may be out of date. If you are unsure of a fact, a name, a number or anything recent, say so.
-          - If a search tool is available, use it for facts you are not sure of, and cite the source URL.
-          - Never invent sources, quotes, numbers or API details.
+          - Your knowledge is limited and may be out of date. If you are unsure of a fact, say so.
+          - If a search tool is available, use it for anything you are not sure of. Base your answer on the search results, not memory. Cite the source URL.
+          - If search results do not contain what was asked for, say so. Do not fill the gap with guesses.
+          - Never invent sources, quotes, numbers, API details, or text in any language. For foreign-language text, copy verbatim from a source or say you could not find it.
+          - Prefer "I don't know" over a plausible-sounding but unverified answer.
 
           Tools:
           - Use a tool only when it is needed to answer. Call one tool at a time and read its result before deciding the next step.
