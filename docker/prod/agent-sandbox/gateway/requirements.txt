@@ -1,0 +1,6 @@
+# Direct dependencies, pinned; bump deliberately. mcp and uvicorn match
+# agent-connectors (verified there against LibreChat's TS SDK, 2026-10-07).
+mcp==2.3.0
+uvicorn==0.54.0
+# Docker Engine API client (async exec streams), over DOCKER_HOST.
+aiodocker==0.27.0

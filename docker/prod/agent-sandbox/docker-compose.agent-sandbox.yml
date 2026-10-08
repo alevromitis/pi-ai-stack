@@ -1,0 +1,216 @@
+name: agent-sandbox
+
+# Topology
+# --------
+#   A throwaway Debian container per LibreChat conversation: root shell,
+#   internet at a capped rate, no LAN. LibreChat reaches the gateway over
+#   Streamable HTTP at http://agent-sandbox-gateway-1:8000/mcp; nothing is
+#   published on the host.
+#
+#   internal  agent-sandbox-internal (internal: true). LibreChat joins it as
+#             external. Only the gateway is on it.
+#   docker    agent-sandbox-docker (internal: true). Gateway <-> socket proxy
+#             only: nothing else can reach the Docker API.
+#   egress    agent-sandbox-egress, bridge ${SANDBOX_BRIDGE}. The sandboxes,
+#             and nothing else. Its limits are host-side (netguard), where
+#             root inside a sandbox can't touch them.
+#
+#   gateway       :8000  MCP tools run / write_file / reset; starts, execs into
+#                        and removes the sandboxes through docker-proxy
+#   docker-proxy  :2375  Docker API, containers + exec + images only
+#   netguard      host   nftables + tc on ${SANDBOX_BRIDGE}; the gateway starts
+#                        no sandbox unless this is healthy
+#   sandbox-image        builds agent-sandbox:local, then exits
+#
+# Sandboxes are not Compose services: the gateway creates them (one per
+# conversation, label agent-sandbox.managed=1) and removes them when idle,
+# too old, over their disk allowance, evicted, reset, or at its own stop.
+
+x-hardened: &hardened
+  restart: unless-stopped
+  security_opt:
+    - "no-new-privileges:true"
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  gateway:
+    <<: *hardened
+    build:
+      context: ./gateway
+    image: agent-sandbox-gateway:local
+    container_name: agent-sandbox-gateway-1
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      docker-proxy:
+        condition: service_started
+      netguard:
+        condition: service_healthy
+      sandbox-image:
+        condition: service_completed_successfully
+    environment:
+      DOCKER_HOST: tcp://agent-sandbox-docker-proxy-1:2375
+      # Exact Host header LibreChat sends (DNS-rebinding allowlist).
+      MCP_ALLOWED_HOSTS: agent-sandbox-gateway-1:8000
+      SANDBOX_IMAGE: agent-sandbox:local
+      SANDBOX_NETWORK: agent-sandbox-egress
+      SANDBOX_NETGUARD: agent-sandbox-netguard-1
+      # Per-sandbox limits and lifecycle, all from .env (see .env.example).
+      SANDBOX_MEMORY: ${SANDBOX_MEMORY:?set SANDBOX_MEMORY in .env}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:?set SANDBOX_CPUS in .env}
+      SANDBOX_CPU_SHARES: ${SANDBOX_CPU_SHARES:-256}
+      SANDBOX_PIDS: ${SANDBOX_PIDS:-512}
+      SANDBOX_DISK_LIMIT: ${SANDBOX_DISK_LIMIT:?set SANDBOX_DISK_LIMIT in .env}
+      SANDBOX_DISK_DEVICE: ${SANDBOX_DISK_DEVICE:-}
+      SANDBOX_DISK_WRITE_BPS: ${SANDBOX_DISK_WRITE_BPS:-50m}
+      SANDBOX_DNS: ${SANDBOX_DNS:-9.9.9.9,1.1.1.1}
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-}
+      SANDBOX_MAX_ACTIVE: ${SANDBOX_MAX_ACTIVE:-2}
+      SANDBOX_IDLE_MINUTES: ${SANDBOX_IDLE_MINUTES:-30}
+      SANDBOX_MAX_HOURS: ${SANDBOX_MAX_HOURS:-4}
+      SANDBOX_MAX_TIMEOUT: ${SANDBOX_MAX_TIMEOUT:-240}
+      SANDBOX_OUTPUT_LIMIT: ${SANDBOX_OUTPUT_LIMIT:-8000}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Removes every sandbox on SIGTERM before Compose removes the egress
+    # network (which refuses to go while sandboxes are attached).
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+          pids: 64
+    networks:
+      - internal
+      - docker
+
+  docker-proxy:
+    <<: *hardened
+    # HAProxy in front of the read-only-mounted socket. It filters by API
+    # path and method, not by request body: it can't stop the gateway from
+    # asking for a privileged container. The gateway is trusted for that
+    # (README "agent-sandbox").
+    image: lscr.io/linuxserver/socket-proxy:${SOCKET_PROXY_TAG:?set SOCKET_PROXY_TAG in .env}
+    container_name: agent-sandbox-docker-proxy-1
+    environment:
+      # /containers/* (create, start, inspect, list, delete, and
+      # /containers/{id}/exec) and /exec/{id}/start|json.
+      CONTAINERS: "1"
+      EXEC: "1"
+      POST: "1"
+      # Defaults kept: PING, VERSION (aiodocker negotiates the API version).
+      # Everything else - images (so no pulls), build, volumes, networks,
+      # system, swarm, events, archive - stays 0.
+      EVENTS: "0"
+      DISABLE_IPV6: "1"
+      LOG_LEVEL: warning
+    read_only: true
+    tmpfs:
+      - /run
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 64M
+          pids: 64
+    networks:
+      - docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  netguard:
+    <<: *hardened
+    build:
+      context: ./netguard
+    image: agent-sandbox-netguard:local
+    container_name: agent-sandbox-netguard-1
+    # The host's namespace, to put rules on the sandbox bridge from outside
+    # every sandbox. NET_ADMIN only, and a fixed script with no inputs.
+    network_mode: host
+    init: true
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+    read_only: true
+    depends_on:
+      # Owns the egress network (bridge ${SANDBOX_BRIDGE}).
+      sandbox-image:
+        condition: service_completed_successfully
+    environment:
+      SANDBOX_BRIDGE: ${SANDBOX_BRIDGE:?set SANDBOX_BRIDGE in .env}
+      SANDBOX_NET_DOWN: ${SANDBOX_NET_DOWN:?set SANDBOX_NET_DOWN in .env}
+      SANDBOX_NET_UP: ${SANDBOX_NET_UP:?set SANDBOX_NET_UP in .env}
+      SANDBOX_NEW_CONN_RATE: ${SANDBOX_NEW_CONN_RATE:-20}
+      SANDBOX_MAX_CONN: ${SANDBOX_MAX_CONN:-256}
+    healthcheck:
+      test: ["CMD", "netguard", "check"]
+      interval: 15s
+      timeout: 5s
+      retries: 2
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 32M
+          pids: 32
+
+  sandbox-image:
+    # Not a sandbox: builds agent-sandbox:local (the gateway starts the real
+    # ones from it) and, by being attached, makes Compose create the egress
+    # network. Runs `true` and exits; `make up` rebuilds nothing unless the
+    # image is missing, so after editing sandbox/Dockerfile run
+    # `docker compose -f docker-compose.agent-sandbox.yml build sandbox-image`.
+    build:
+      context: ./sandbox
+    image: agent-sandbox:local
+    container_name: agent-sandbox-image-1
+    command: ["true"]
+    restart: "no"
+    networks:
+      - egress
+
+networks:
+  internal:
+    name: agent-sandbox-internal
+    driver: bridge
+    internal: true
+    # Explicit subnets: rpi's default address pools are exhausted (README
+    # "Points for improvement"); librechat has 10.89.10-11, connectors 10.89.20.
+    ipam:
+      config:
+        - subnet: 10.89.30.0/24
+  docker:
+    name: agent-sandbox-docker
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.31.0/24
+  egress:
+    name: agent-sandbox-egress
+    driver: bridge
+    driver_opts:
+      # Fixed name: netguard's rules match it.
+      com.docker.network.bridge.name: ${SANDBOX_BRIDGE:?set SANDBOX_BRIDGE in .env}
+      # No sandbox-to-sandbox traffic (another chat's sandbox is off limits).
+      com.docker.network.bridge.enable_icc: "false"
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 10.89.32.0/24
