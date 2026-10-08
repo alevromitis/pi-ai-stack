@@ -49,6 +49,9 @@ endpoints:
 # Pi. mcp-searxng gives the model `searxng_web_search` + `web_url_read`
 # against our own SearXNG instead.
 mcpServers:
+  # Only Web Search, Playwright Browser and Debian Sandbox are active
+  # (2026-10-08); the rest are commented out, with their allowedAddresses
+  # entries. Uncomment both to bring one back.
   # The agent-tools stack: one sandboxed container per server, reached over
   # agent-tools-internal (see its compose file). Shell and filesystem have
   # no network and see only /workspace.
@@ -59,17 +62,17 @@ mcpServers:
     description: 'SearXNG search and page reading.'
     # A search or page read can be slow from the Pi.
     timeout: 60000
-  shell:
-    type: streamable-http
-    url: 'http://mcp-shell-1:8000/mcp'
-    title: 'Sandbox Shell'
-    description: 'Allowlisted commands in /workspace; no network.'
-    timeout: 130000
-  filesystem:
-    type: streamable-http
-    url: 'http://mcp-filesystem-1:8000/mcp'
-    title: 'Workspace Files'
-    description: 'Read and write files in the shared agent workspace.'
+  # shell:
+  #   type: streamable-http
+  #   url: 'http://mcp-shell-1:8000/mcp'
+  #   title: 'Sandbox Shell'
+  #   description: 'Allowlisted commands in /workspace; no network.'
+  #   timeout: 130000
+  # filesystem:
+  #   type: streamable-http
+  #   url: 'http://mcp-filesystem-1:8000/mcp'
+  #   title: 'Workspace Files'
+  #   description: 'Read and write files in the shared agent workspace.'
   playwright:
     type: streamable-http
     url: 'http://mcp-playwright-1:8931/mcp'
@@ -81,33 +84,33 @@ mcpServers:
   # agent-connectors-internal (see its compose file). Each container holds
   # one service's API/app password; the agent-tools containers can't reach
   # them. Write tools are on, deletes off (ALLOW_DELETE in its env files).
-  freshrss:
-    type: streamable-http
-    url: 'http://mcp-freshrss-1:8000/freshrss/mcp'
-    title: 'FreshRSS'
-    description: 'Feeds and unread articles; mark read, star, subscribe.'
-  calendar:
-    type: streamable-http
-    url: 'http://mcp-nextcloud-1:8000/calendar/mcp'
-    title: 'Calendar'
-    description: 'Nextcloud Calendar: list, add and change events.'
-  tasks:
-    type: streamable-http
-    url: 'http://mcp-nextcloud-1:8000/tasks/mcp'
-    title: 'Tasks'
-    description: 'Nextcloud Tasks: list, add, complete and change tasks.'
-  notes:
-    type: streamable-http
-    url: 'http://mcp-nextcloud-1:8000/notes/mcp'
-    title: 'Notes'
-    description: 'Nextcloud Notes: find, read, add to and write notes.'
+  # freshrss:
+  #   type: streamable-http
+  #   url: 'http://mcp-freshrss-1:8000/freshrss/mcp'
+  #   title: 'FreshRSS'
+  #   description: 'Feeds and unread articles; mark read, star, subscribe.'
+  # calendar:
+  #   type: streamable-http
+  #   url: 'http://mcp-nextcloud-1:8000/calendar/mcp'
+  #   title: 'Calendar'
+  #   description: 'Nextcloud Calendar: list, add and change events.'
+  # tasks:
+  #   type: streamable-http
+  #   url: 'http://mcp-nextcloud-1:8000/tasks/mcp'
+  #   title: 'Tasks'
+  #   description: 'Nextcloud Tasks: list, add, complete and change tasks.'
+  # notes:
+  #   type: streamable-http
+  #   url: 'http://mcp-nextcloud-1:8000/notes/mcp'
+  #   title: 'Notes'
+  #   description: 'Nextcloud Notes: find, read, add to and write notes.'
   # Add-only view of the calendar and tasks (no edit/delete tools exist on
   # it), for agents that read untrusted feed text and file what they find.
-  calendar-add:
-    type: streamable-http
-    url: 'http://mcp-nextcloud-1:8000/calendar-add/mcp'
-    title: 'Calendar Add Only'
-    description: 'List events and tasks, add new ones; never changes existing entries.'
+  # calendar-add:
+  #   type: streamable-http
+  #   url: 'http://mcp-nextcloud-1:8000/calendar-add/mcp'
+  #   title: 'Calendar Add Only'
+  #   description: 'List events and tasks, add new ones; never changes existing entries.'
   # The agent-sandbox stack: a throwaway Debian container per conversation
   # (root shell, internet), over agent-sandbox-internal.
   # The conversation id picks the sandbox, so a new chat gets a fresh one.
@@ -129,11 +132,11 @@ mcpSettings:
   # listed here (host:port, exact).
   allowedAddresses:
     - 'mcp-searxng-1:8080'
-    - 'mcp-shell-1:8000'
-    - 'mcp-filesystem-1:8000'
+    # - 'mcp-shell-1:8000'
+    # - 'mcp-filesystem-1:8000'
     - 'mcp-playwright-1:8931'
-    - 'mcp-freshrss-1:8000'
-    - 'mcp-nextcloud-1:8000'
+    # - 'mcp-freshrss-1:8000'
+    # - 'mcp-nextcloud-1:8000'
     - 'agent-sandbox-gateway-1:8000'
 
 interface:
