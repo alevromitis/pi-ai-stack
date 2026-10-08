@@ -73,18 +73,18 @@ def env_size(name: str, default: str) -> int:
 
 IMAGE = env("SANDBOX_IMAGE", "agent-sandbox:local")
 NETWORK = env("SANDBOX_NETWORK", "agent-sandbox-egress")
-NETGUARD = env("SANDBOX_NETGUARD", "agent-sandbox-netguard-1")
-DNS = [s.strip() for s in env("SANDBOX_DNS", "9.9.9.9,1.1.1.1").split(",") if s.strip()]
-MEMORY = env_size("SANDBOX_MEMORY", "1g")
-CPUS = float(env("SANDBOX_CPUS", "1.5"))
+# RAM, and RAM + swap: the difference is what the kernel may page out.
+MEMORY = env_size("SANDBOX_MEMORY", "256m")
+MEMORY_SWAP = max(env_size("SANDBOX_MEMORY_SWAP", "1g"), MEMORY)
+CPUS = float(env("SANDBOX_CPUS", "1"))
 CPU_SHARES = env_int("SANDBOX_CPU_SHARES", 256)
 PIDS = env_int("SANDBOX_PIDS", 512)
-SHM = env_size("SANDBOX_SHM", "256m")
+SHM = env_size("SANDBOX_SHM", "64m")
 DISK_LIMIT = env_size("SANDBOX_DISK_LIMIT", "4g")
 DISK_DEVICE = os.environ.get("SANDBOX_DISK_DEVICE", "").strip()
 DISK_WRITE_BPS = env_size("SANDBOX_DISK_WRITE_BPS", "50m")
 RUNTIME = os.environ.get("SANDBOX_RUNTIME", "").strip()
-MAX_ACTIVE = env_int("SANDBOX_MAX_ACTIVE", 2)
+MAX_ACTIVE = env_int("SANDBOX_MAX_ACTIVE", 1)
 IDLE_SECONDS = env_int("SANDBOX_IDLE_MINUTES", 30) * 60
 MAX_AGE_SECONDS = env_int("SANDBOX_MAX_HOURS", 4) * 3600
 DEFAULT_TIMEOUT = env_int("SANDBOX_DEFAULT_TIMEOUT", 60)
@@ -113,16 +113,15 @@ def sandbox_config(conversation: str, user: str) -> dict[str, Any]:
     host: dict[str, Any] = {
         "Init": True,
         "NetworkMode": NETWORK,
-        "Dns": DNS,
         "Memory": MEMORY,
-        # Equal to Memory: no swap.
-        "MemorySwap": MEMORY,
+        # RAM + swap (memory.swap.max = MemorySwap - Memory).
+        "MemorySwap": MEMORY_SWAP,
         "NanoCpus": int(CPUS * 1e9),
         "CpuShares": CPU_SHARES,
         "PidsLimit": PIDS,
         "ShmSize": SHM,
         "Ulimits": [{"Name": "nofile", "Soft": 8192, "Hard": 8192}],
-        # Raw sockets (spoofing on the bridge), device nodes, audit log.
+        # Raw sockets (packet spoofing), device nodes, audit log.
         # ping still works: Docker opens ICMP datagram sockets to all groups.
         "CapDrop": ["NET_RAW", "MKNOD", "AUDIT_WRITE"],
         "SecurityOpt": ["no-new-privileges:true"],
@@ -236,15 +235,14 @@ class Sandboxes:
         if state.get("Running"):
             return None
         if state.get("OOMKilled"):
-            return f"it hit the {human(MEMORY)} memory limit"
+            return f"it hit the {human(MEMORY_SWAP)} memory limit"
         return f"its container stopped (exit {state.get('ExitCode')})"
 
     async def _create(self, conversation: str, user: str) -> Sandbox:
         assert self.docker is not None
-        await self._require_netguard()
         while len(self.active) >= MAX_ACTIVE:
             oldest = min(self.active.values(), key=lambda b: b.used)
-            await self._drop(oldest.conversation, "a newer chat needed its slot")
+            await self._drop(oldest.conversation, "another chat needed its slot")
         name = f"agent-sandbox-{conversation[:8]}-{secrets.token_hex(2)}"
         # create + start, not containers.run(): that pulls on a missing image,
         # which the proxy refuses (403) and which isn't wanted anyway.
@@ -264,19 +262,6 @@ class Sandboxes:
         self.active[conversation] = box
         log.info("created %s (%d active)", name, len(self.active))
         return box
-
-    async def _require_netguard(self) -> None:
-        """Fail closed: without netguard's rules a sandbox would reach the LAN."""
-        assert self.docker is not None
-        try:
-            guard = await self.docker.containers.get(NETGUARD)
-            status = (guard["State"].get("Health") or {}).get("Status", "without a healthcheck")
-        except aiodocker.DockerError:
-            status = "missing"
-        if status != "healthy":
-            raise ToolError(
-                f"No sandbox can start: its network guard is {status}. (Admin: `make ps` / `make logs` in agent-sandbox.)"
-            )
 
     async def _drop(self, conversation: str, reason: str, remember: bool = True) -> None:
         box = self.active.pop(conversation, None)
@@ -463,7 +448,7 @@ def tool(destructive: bool = False) -> Callable:
 
 @tool()
 async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str:
-    """Run a bash command in this chat's own Debian sandbox. You are root in /work; internet works (rate-limited), the LAN doesn't. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
+    """Run a bash command in this chat's own Debian sandbox. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
     conversation, user = caller(ctx)
     timeout = max(1, min(timeout, MAX_TIMEOUT))
     box, note = await sandboxes.get(conversation, user)
@@ -473,7 +458,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     elif result.exit_code in (124, 137) and result.seconds >= timeout:
         status = f"[timed out after {timeout}s and was stopped; run long jobs in the background: nohup CMD > log 2>&1 &]"
     elif result.exit_code == 137:
-        status = f"[killed (exit 137), most likely by the {human(MEMORY)} memory limit, {result.seconds:.1f}s]"
+        status = f"[killed (exit 137), most likely by the {human(MEMORY_SWAP)} memory limit, {result.seconds:.1f}s]"
     else:
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s]"
     return "\n".join(part for part in (note, result.output, status) if part)

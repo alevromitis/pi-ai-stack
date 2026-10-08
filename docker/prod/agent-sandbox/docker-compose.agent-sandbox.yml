@@ -2,24 +2,21 @@ name: agent-sandbox
 
 # Topology
 # --------
-#   A throwaway Debian container per LibreChat conversation: root shell,
-#   internet at a capped rate, no LAN. LibreChat reaches the gateway over
-#   Streamable HTTP at http://agent-sandbox-gateway-1:8000/mcp; nothing is
-#   published on the host.
+#   A throwaway Debian container per LibreChat conversation: root shell and
+#   plain Docker networking (internet, and like any container also the LAN
+#   and the host's published ports: no host-side rules, by choice). LibreChat
+#   reaches the gateway over Streamable HTTP at
+#   http://agent-sandbox-gateway-1:8000/mcp; nothing is published on the host.
 #
 #   internal  agent-sandbox-internal (internal: true). LibreChat joins it as
 #             external. Only the gateway is on it.
 #   docker    agent-sandbox-docker (internal: true). Gateway <-> socket proxy
 #             only: nothing else can reach the Docker API.
-#   egress    agent-sandbox-egress, bridge ${SANDBOX_BRIDGE}. The sandboxes,
-#             and nothing else. Its limits are host-side (netguard), where
-#             root inside a sandbox can't touch them.
+#   egress    agent-sandbox-egress. The sandboxes, and nothing else.
 #
 #   gateway       :8000  MCP tools run / write_file / reset; starts, execs into
 #                        and removes the sandboxes through docker-proxy
-#   docker-proxy  :2375  Docker API, containers + exec + images only
-#   netguard      host   nftables + tc on ${SANDBOX_BRIDGE}; the gateway starts
-#                        no sandbox unless this is healthy
+#   docker-proxy  :2375  Docker API, containers + exec only
 #   sandbox-image        builds agent-sandbox:local, then exits
 #
 # Sandboxes are not Compose services: the gateway creates them (one per
@@ -52,8 +49,6 @@ services:
     depends_on:
       docker-proxy:
         condition: service_started
-      netguard:
-        condition: service_healthy
       sandbox-image:
         condition: service_completed_successfully
     environment:
@@ -62,18 +57,17 @@ services:
       MCP_ALLOWED_HOSTS: agent-sandbox-gateway-1:8000
       SANDBOX_IMAGE: agent-sandbox:local
       SANDBOX_NETWORK: agent-sandbox-egress
-      SANDBOX_NETGUARD: agent-sandbox-netguard-1
       # Per-sandbox limits and lifecycle, all from .env (see .env.example).
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:?set SANDBOX_MEMORY in .env}
+      SANDBOX_MEMORY_SWAP: ${SANDBOX_MEMORY_SWAP:?set SANDBOX_MEMORY_SWAP in .env}
       SANDBOX_CPUS: ${SANDBOX_CPUS:?set SANDBOX_CPUS in .env}
       SANDBOX_CPU_SHARES: ${SANDBOX_CPU_SHARES:-256}
       SANDBOX_PIDS: ${SANDBOX_PIDS:-512}
       SANDBOX_DISK_LIMIT: ${SANDBOX_DISK_LIMIT:?set SANDBOX_DISK_LIMIT in .env}
       SANDBOX_DISK_DEVICE: ${SANDBOX_DISK_DEVICE:-}
       SANDBOX_DISK_WRITE_BPS: ${SANDBOX_DISK_WRITE_BPS:-50m}
-      SANDBOX_DNS: ${SANDBOX_DNS:-9.9.9.9,1.1.1.1}
       SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-}
-      SANDBOX_MAX_ACTIVE: ${SANDBOX_MAX_ACTIVE:-2}
+      SANDBOX_MAX_ACTIVE: ${SANDBOX_MAX_ACTIVE:-1}
       SANDBOX_IDLE_MINUTES: ${SANDBOX_IDLE_MINUTES:-30}
       SANDBOX_MAX_HOURS: ${SANDBOX_MAX_HOURS:-4}
       SANDBOX_MAX_TIMEOUT: ${SANDBOX_MAX_TIMEOUT:-240}
@@ -131,45 +125,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
-  netguard:
-    <<: *hardened
-    build:
-      context: ./netguard
-    image: agent-sandbox-netguard:local
-    container_name: agent-sandbox-netguard-1
-    # The host's namespace, to put rules on the sandbox bridge from outside
-    # every sandbox. NET_ADMIN only, and a fixed script with no inputs.
-    network_mode: host
-    init: true
-    user: "0:0"
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_ADMIN
-    read_only: true
-    depends_on:
-      # Owns the egress network (bridge ${SANDBOX_BRIDGE}).
-      sandbox-image:
-        condition: service_completed_successfully
-    environment:
-      SANDBOX_BRIDGE: ${SANDBOX_BRIDGE:?set SANDBOX_BRIDGE in .env}
-      SANDBOX_NET_DOWN: ${SANDBOX_NET_DOWN:?set SANDBOX_NET_DOWN in .env}
-      SANDBOX_NET_UP: ${SANDBOX_NET_UP:?set SANDBOX_NET_UP in .env}
-      SANDBOX_NEW_CONN_RATE: ${SANDBOX_NEW_CONN_RATE:-20}
-      SANDBOX_MAX_CONN: ${SANDBOX_MAX_CONN:-256}
-    healthcheck:
-      test: ["CMD", "netguard", "check"]
-      interval: 15s
-      timeout: 5s
-      retries: 2
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 32M
-          pids: 32
-
   sandbox-image:
     # Not a sandbox: builds agent-sandbox:local (the gateway starts the real
     # ones from it) and, by being attached, makes Compose create the egress
@@ -205,12 +160,6 @@ networks:
   egress:
     name: agent-sandbox-egress
     driver: bridge
-    driver_opts:
-      # Fixed name: netguard's rules match it.
-      com.docker.network.bridge.name: ${SANDBOX_BRIDGE:?set SANDBOX_BRIDGE in .env}
-      # No sandbox-to-sandbox traffic (another chat's sandbox is off limits).
-      com.docker.network.bridge.enable_icc: "false"
-    enable_ipv6: false
     ipam:
       config:
         - subnet: 10.89.32.0/24
