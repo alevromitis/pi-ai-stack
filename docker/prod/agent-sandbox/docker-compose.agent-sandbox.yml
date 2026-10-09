@@ -70,7 +70,8 @@ services:
       SANDBOX_MAX_ACTIVE: ${SANDBOX_MAX_ACTIVE:-1}
       SANDBOX_IDLE_MINUTES: ${SANDBOX_IDLE_MINUTES:-30}
       SANDBOX_MAX_HOURS: ${SANDBOX_MAX_HOURS:-4}
-      SANDBOX_MAX_TIMEOUT: ${SANDBOX_MAX_TIMEOUT:-240}
+      SANDBOX_DEFAULT_TIMEOUT: ${SANDBOX_DEFAULT_TIMEOUT:-300}
+      SANDBOX_MAX_TIMEOUT: ${SANDBOX_MAX_TIMEOUT:-300}
       SANDBOX_OUTPUT_LIMIT: ${SANDBOX_OUTPUT_LIMIT:-8000}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]

@@ -130,8 +130,10 @@ mcpServers:
     headers:
       X-Conversation-ID: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
       X-User-ID: '{{LIBRECHAT_USER_ID}}'
-    # A command may run SANDBOX_MAX_TIMEOUT (240 s), plus ~15 s of grace.
-    timeout: 270000
+    # A command may run SANDBOX_MAX_TIMEOUT (300 s), plus ~15 s of grace and
+    # a fresh sandbox's start. Also LibreChat's HTTP header/body timeout for
+    # this server, so the reply can take that long to begin.
+    timeout: 360000
 
 mcpSettings:
   # LibreChat blocks MCP URLs that resolve to private addresses unless
