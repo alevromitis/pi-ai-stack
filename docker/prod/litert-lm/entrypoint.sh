@@ -7,7 +7,7 @@ mkdir -p "${REGISTRY_DIR}"
 : "${LITERT_MODEL_ID:=gemma4-e2b}"
 : "${LITERT_HF_REPO:=litert-community/gemma-4-E2B-it-litert-lm}"
 : "${LITERT_MODEL_FILE:=gemma-4-E2B-it.litertlm}"
-: "${LITERT_BACKEND:=gpu}"
+: "${LITERT_BACKEND:=cpu}"
 : "${LITERT_MAX_NUM_TOKENS:=8192}"
 export LITERT_MODEL_ID LITERT_BACKEND LITERT_MAX_NUM_TOKENS
 
