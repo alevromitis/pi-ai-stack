@@ -17,9 +17,11 @@ name: agent-tools
 #   mcp-filesystem  :8000  read/write confined to /workspace
 #   mcp-playwright  :8931  headless Chromium; files to /workspace/playwright
 #   mcp-searxng     :8080  web search via searxng-1 + web_url_read (no workspace)
+#   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only
 #
-# All three share ${AGENT_WORKSPACE_DIR} as /workspace (uid 1000), the only
-# host path any of them can touch.
+# Shell, filesystem and Playwright share ${AGENT_WORKSPACE_DIR} as
+# /workspace (uid 1000), the only host path they can touch. mcp-wikipedia
+# sees only ${WIKIPEDIA_ZIM_DIR}, read-only.
 
 x-sandbox: &sandbox
   restart: unless-stopped
@@ -209,6 +211,50 @@ services:
         priority: 50
       searxng:
         priority: 10
+
+  mcp-wikipedia:
+    <<: *sandbox
+    build:
+      context: ./wikipedia
+    image: agent-tools-wikipedia:local
+    container_name: mcp-wikipedia-1
+    environment:
+      # The tool's description names the snapshot from the ZIM's own Date
+      # metadata, so a newer file needs only WIKIPEDIA_ZIM_FILE changed.
+      WIKIPEDIA_ZIM: /zim/${WIKIPEDIA_ZIM_FILE:?set WIKIPEDIA_ZIM_FILE in .env}
+      # Exact Host header LibreChat sends (DNS-rebinding allowlist).
+      MCP_ALLOWED_HOSTS: mcp-wikipedia-1:8000
+      # Small-context tuning (see README "agent-tools"): 5 passages of <=500
+      # chars from the top 3 articles, ~2.4k chars (~600 tokens) a search.
+      WIKIPEDIA_RESULTS: "5"
+      WIKIPEDIA_ARTICLES: "3"
+      WIKIPEDIA_PASSAGE_CHARS: "500"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Opening the 50 GB archive takes ~1 s on the Pi.
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          # ~340 MB RSS measured; the ZIM's page cache fills the rest.
+          memory: 512M
+          pids: 64
+    # No internet, no LAN: it reads one local file.
+    networks:
+      - internal
+    volumes:
+      - type: bind
+        source: ${WIKIPEDIA_ZIM_DIR:?set WIKIPEDIA_ZIM_DIR in .env}
+        target: /zim
+        read_only: true
+        bind:
+          # /mnt/external is a USB disk: if it isn't mounted, fail rather
+          # than create an empty directory on the root disk.
+          create_host_path: false
 
 networks:
   internal:

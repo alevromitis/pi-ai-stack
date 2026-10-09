@@ -59,9 +59,9 @@ endpoints:
 # Pi. mcp-searxng gives the model `searxng_web_search` + `web_url_read`
 # against our own SearXNG instead.
 mcpServers:
-  # Only Web Search, Playwright Browser and Debian Sandbox are active
-  # (2026-10-08); the rest are commented out, with their allowedAddresses
-  # entries. Uncomment both to bring one back.
+  # Only Web Search, Wikipedia, Playwright Browser and Debian Sandbox are
+  # active (2026-10-10); the rest are commented out, with their
+  # allowedAddresses entries. Uncomment both to bring one back.
   # The agent-tools stack: one sandboxed container per server, reached over
   # agent-tools-internal (see its compose file). Shell and filesystem have
   # no network and see only /workspace.
@@ -72,6 +72,14 @@ mcpServers:
     description: 'SearXNG search and page reading.'
     # A search or page read can be slow from the Pi.
     timeout: 60000
+  # Offline English Wikipedia (Kiwix ZIM) in agent-tools, no network: one
+  # wikipedia_search tool, 5 passages with links (~600 tokens), ~0.2 s.
+  wikipedia:
+    type: streamable-http
+    url: 'http://mcp-wikipedia-1:8000/mcp'
+    title: 'Wikipedia'
+    description: 'Offline English Wikipedia: passages with links.'
+    timeout: 30000
   # shell:
   #   type: streamable-http
   #   url: 'http://mcp-shell-1:8000/mcp'
@@ -144,6 +152,7 @@ mcpSettings:
   # listed here (host:port, exact).
   allowedAddresses:
     - 'mcp-searxng-1:8080'
+    - 'mcp-wikipedia-1:8000'
     # - 'mcp-shell-1:8000'
     # - 'mcp-filesystem-1:8000'
     - 'mcp-playwright-1:8931'
