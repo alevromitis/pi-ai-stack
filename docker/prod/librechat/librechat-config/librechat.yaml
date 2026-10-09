@@ -15,8 +15,12 @@ endpoints:
       apiKey: '${LITERT_LM_API_KEY}'
       baseURL: '${LITERT_LM_BASE_URL}'
       models:
-        # Fetched from GET /v1/models. `default` is fallback (required non-empty).
-        fetch: true
+        # Not fetched: GET /v1/models lists litert-lm-1's whole registry,
+        # which also holds gemma4-e4b and an embedding model imported before
+        # litert-lm-2 existed (embeddinggemma2-text). That one can't chat: a
+        # chat request for it makes litert-lm close Gemma's engine to load
+        # it. So the picker shows exactly this list.
+        fetch: false
         default:
           - 'gemma4-e2b'
           # Off for now (~3x slower on the Pi); see litert-lm/.env.example.

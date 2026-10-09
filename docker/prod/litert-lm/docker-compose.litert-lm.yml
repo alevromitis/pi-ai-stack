@@ -1,5 +1,6 @@
 name: litert-lm
 
+# litert-lm-1 serves the chat model, litert-lm-2 the embedding model.
 # Owns the `litert-lm-external` network that librechat joins as external.
 
 services:
@@ -46,12 +47,49 @@ services:
     # Equal to mem_limit = no extra swap allowed for this container at all.
     memswap_limit: "${LITERT_MEM_LIMIT:-7g}"
 
+  # Embeddings for LibreChat's rag_api (../librechat). A second server, not a
+  # second model on litert-lm-1: `serve` is a single-threaded HTTPServer, so
+  # embedding an upload there would queue chat replies behind it.
+  litert-lm-2:
+    # Built by the litert-lm service above; never pulled.
+    image: litert-lm-rpi5:local
+    pull_policy: never
+    container_name: litert-lm-2
+    platform: linux/arm64
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      # EmbeddingGemma 2 Text 270M: text-only, 768-d output, ~280 MB RSS and
+      # ~160 ms per 128-token input on a Pi 5 CPU (model card). Changing the
+      # model invalidates every stored vector: re-upload files afterwards.
+      # LITERT_MODEL_ID is what rag_api sends as EMBEDDINGS_MODEL.
+      LITERT_HF_REPO: "litert-community/embeddinggemma-2-text-270m-litert-lm"
+      LITERT_MODEL_FILE: "embeddinggemma-2-text-270m.litertlm"
+      LITERT_MODEL_ID: "embeddinggemma2-270m"
+      # Not gpu: on the Pi 5's V3D (2026-10-09) a one-line query took 38 s vs
+      # 0.9 s on CPU, a 1500-char chunk hit LiteRT's 2-min timeout, and it was
+      # OOM-killed at 1 GiB (GPU buffers count against mem_limit).
+      LITERT_BACKEND: "cpu"
+      # Unused by the embedding engine; set so config.json renders.
+      LITERT_MAX_NUM_TOKENS: "8192"
+    volumes:
+      # Its own registry: the entrypoint rewrites config.json on every start,
+      # so sharing litert-lm-1's would clobber that model's settings.
+      - litert-embed-registry:/root/.litert-lm
+    # No published port: only rag_api calls it, over litert-lm-external.
+    networks:
+      - external
+    mem_limit: "${LITERT_EMBED_MEM_LIMIT:-1g}"
+    memswap_limit: "${LITERT_EMBED_MEM_LIMIT:-1g}"
+
 volumes:
   litert-registry:
     # Pinned: the stack ran as Compose project `litert`, and the imported
     # model lives in this volume. Without `name:` the project rename would
     # create an empty litert-lm_litert-registry and re-download the model.
     name: litert_litert-registry
+  litert-embed-registry:
 
 networks:
   external:

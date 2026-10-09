@@ -14,13 +14,16 @@ name: librechat
 #                            stack): the per-chat Debian sandbox gateway
 #   mongodb      conversation/user store, `internal` only, --noauth, unreachable off-host
 #   meilisearch  conversation search index, `internal` only
+#   rag_api      file search: chunks and embeds uploads, `internal` + `litert`
+#                  (embeddings from litert-lm-2:9379)
+#   vectordb     pgvector store for rag_api, `internal` only, trust auth
 #
-# Model provider (litert-lm-1:9379) and the MCP tool servers (agent-tools,
-# incl. search; agent-connectors; agent-sandbox) are external. Those stacks
-# must be up first.
+# Model providers (litert-lm-1:9379 chat, litert-lm-2:9379 embeddings) and
+# the MCP tool servers (agent-tools, incl. search; agent-connectors;
+# agent-sandbox) are external. Those stacks must be up first.
 # Upstream: https://github.com/danny-avila/LibreChat/blob/v0.8.7/docker-compose.yml
-# Divergences: env_file (not bind-mount), no rag_api/vectordb (no RAM to spare on rpi),
-# no admin-panel/nginx, split internal/external networks
+# Divergences: env_file (not bind-mount), no admin-panel/nginx, split
+# internal/external networks, rag_api embeds via LiteRT-LM (not OpenAI)
 
 services:
   librechat:
@@ -56,6 +59,8 @@ services:
       MEILI_HOST: http://librechat-meilisearch-1:7700
       SEARCH: "true"
       CONFIG_PATH: /app/librechat.yaml
+      # Setting it turns on file search (agents' file_search tool).
+      RAG_API_URL: http://librechat-rag-api-1:8000
     env_file:
       # .env is auto-loaded for interpolation in ports:/volumes (env_file doesn't).
       - .env
@@ -66,6 +71,8 @@ services:
       mongodb:
         condition: service_healthy
       meilisearch:
+        condition: service_healthy
+      rag_api:
         condition: service_healthy
     healthcheck:
       # The image is node:alpine - it ships busybox wget, not curl.
@@ -198,6 +205,102 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ${LIBRECHAT_MEILI_DATA_DIR:?set LIBRECHAT_MEILI_DATA_DIR in .env}:/meili_data
 #    read_only: true
+    tmpfs:
+      - /tmp
+
+  vectordb:
+    # digest for 0.8.0-pg15-trixie:
+    #   sha256:8809cfffff0082cf260c9ac752f1dd1afc77f6f0a55c4e6411321e78efc3d9a5
+    image: pgvector/pgvector:${PGVECTOR_TAG:-0.8.0-pg15-trixie}
+    container_name: librechat-vectordb-1
+    restart: unless-stopped
+    # Data dir must be chown 1000:1000 before first start, like Mongo's.
+    user: "1000:1000"
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      # Trust safe only on `internal` (no off-host route, no port), like
+      # Mongo's --noauth. Don't move to `external`.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ${LIBRECHAT_VECTORDB_DATA_DIR:?set LIBRECHAT_VECTORDB_DATA_DIR in .env}:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+
+  rag_api:
+    # digest for v0.9.0:
+    #   sha256:18a8dffa9316276b924bf3fd23bfb4544b0f68f8f6b14c048affb35c01721a35
+    image: ghcr.io/danny-avila/librechat-rag-api-dev-lite:${RAG_API_TAG:-v0.9.0}
+    container_name: librechat-rag-api-1
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      DB_HOST: librechat-vectordb-1
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      # Ignored under trust auth; set so the default isn't mistaken for a secret.
+      POSTGRES_PASSWORD: unused
+      COLLECTION_NAME: librechat
+      # LiteRT-LM speaks OpenAI's /v1/embeddings. The model id is litert-lm-2's
+      # LITERT_MODEL_ID; the key is a placeholder (no auth, but the client
+      # requires one).
+      EMBEDDINGS_PROVIDER: openai
+      EMBEDDINGS_MODEL: embeddinggemma2-270m
+      RAG_OPENAI_BASEURL: http://litert-lm-2:9379/v1
+      RAG_OPENAI_API_KEY: litert-lm
+      # Required: when true, langchain sends tiktoken ids instead of text, and
+      # LiteRT-LM embeds each id as the string "1234" - garbage vectors, no error.
+      RAG_CHECK_EMBEDDING_CTX_LENGTH: "false"
+      # EmbeddingGemma 2's retrieval prompts, added by run_with_prefixes.py.
+      # Changing either invalidates stored vectors: re-upload files afterwards.
+      EMBEDDINGS_QUERY_PREFIX: "task: search result | query: "
+      EMBEDDINGS_DOCUMENT_PREFIX: "title: none | text: "
+    # Upstream CMD is `python main.py`; this wraps it to add the prefixes.
+    command: ["python", "/opt/rag-api/run_with_prefixes.py"]
+    env_file:
+      # For JWT_SECRET (the only variable in it rag_api reads): rag_api checks
+      # LibreChat's tokens with it, and serves every request unauthenticated
+      # if it is missing.
+      - .env.librechat
+    depends_on:
+      vectordb:
+        condition: service_healthy
+    healthcheck:
+      # python:slim image: no curl or wget.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      # internal: librechat + vectordb. litert: litert-lm-2.
+      - internal
+      - litert
+    volumes:
+      - ./rag-api/run_with_prefixes.py:/opt/rag-api/run_with_prefixes.py:ro
     tmpfs:
       - /tmp
 
