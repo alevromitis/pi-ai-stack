@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # native OpenAI-compatible server) inside an isolated venv.
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir litert-lm==0.17.1
+    && /opt/venv/bin/pip install --no-cache-dir litert-lm==0.18.0
 
 # `serve` never passes enable_ynnpack to the Engine (only `run`/`benchmark`
 # have --enable-ynnpack, and config.json ignores the key), so patch it in.
@@ -54,8 +54,10 @@ RUN python3 -m venv /opt/venv \
 # prefill 148 vs 103 tok/s, decode 9.1 vs 8.5 over XNNPACK (gemma4-e4b: no
 # gain). It is also what fits the context: under XNNPACK gemma4-e2b is
 # OOM-killed at max_num_tokens >= 16384 (7 GB cap); YNNPACK serves 32768.
+# arm64 only: the x86_64 wheels lack YNNPACK, and since 0.18.0 requesting it
+# there fails engine creation instead of being ignored.
 # Fails the build if upstream changes the line this anchors on.
-RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve_util.py')" \
+RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
     && sed -i 's/^\( *\)use_ringbuffers_local_attention=True,$/&\n\1enable_ynnpack=True,/' "$f" \
     && grep -q 'enable_ynnpack=True' "$f"
 
@@ -65,10 +67,10 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve_util.py')" \
 # Gemma's thinking as reasoning_content (upstream generates and discards it).
 # Fails the build on upstream drift.
 COPY patches/ /tmp/patches/
-RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/openai_handler.py')" \
-    && cp /tmp/patches/prefix_cache.py "$(dirname "$f")/" \
-    && python3 /tmp/patches/apply_prefix_cache.py "$f" \
-    && python3 /tmp/patches/apply_reasoning.py "$f" \
+RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_handler.py')")" \
+    && cp /tmp/patches/prefix_cache.py "$d/" \
+    && python3 /tmp/patches/apply_prefix_cache.py "$d" \
+    && python3 /tmp/patches/apply_reasoning.py "$d" \
     && rm -rf /tmp/patches
 
 WORKDIR /app

@@ -1,7 +1,7 @@
 """Prefix (KV) cache for `litert-lm serve`'s chat completions endpoint.
 
-Not part of upstream LiteRT-LM: copied into litert_lm_cli/commands/ by the
-Dockerfile and wired in by apply_prefix_cache.py.
+Not part of upstream LiteRT-LM: copied into litert_lm_cli/commands/serve/ by
+the Dockerfile and wired in by apply_prefix_cache.py.
 
 Upstream builds a fresh Conversation for every request, so the system
 prompt, tool schemas and the whole history are prefilled again on every
@@ -129,7 +129,7 @@ class _RecordingConversation:
   def __init__(self, conv: litert_lm.Conversation):
     self._conv = conv
     self.text_parts: list[str] = []
-    self.tool_calls: list[Any] = []
+    self.tool_calls: list[litert_lm.ToolCall] = []
     self.completed = False
     self.cancelled = False
 
@@ -141,11 +141,10 @@ class _RecordingConversation:
     self._conv.cancel_process()
 
   def send_message_async(self, *args, **kwargs):
+    # Chunks are litert_lm.Message; str() is its text, as upstream sends it.
     for chunk in self._conv.send_message_async(*args, **kwargs):
-      for item in chunk.get("content", []):
-        if item.get("type") == "text":
-          self.text_parts.append(item.get("text", ""))
-      self.tool_calls.extend(chunk.get("tool_calls", []))
+      self.text_parts.append(str(chunk))
+      self.tool_calls.extend(chunk.tool_calls)
       yield chunk
     self.completed = True
 
@@ -154,7 +153,8 @@ class _RecordingConversation:
         "role": "assistant",
         "content": "".join(self.text_parts),
         "tool_calls": [
-            {"function": tc.get("function", {})} for tc in self.tool_calls
+            {"function": {"name": tc.name, "arguments": tc.arguments}}
+            for tc in self.tool_calls
         ],
     }
 

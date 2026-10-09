@@ -32,4 +32,5 @@ else
 fi
 
 echo "== Starting LiteRT-LM OpenAI-compatible server on 0.0.0.0:9379 (backend=${LITERT_BACKEND} for ${LITERT_MODEL_ID}) =="
+# --host is required: since 0.18 serve defaults to 127.0.0.1 (container-only).
 exec litert-lm serve --host 0.0.0.0 --port 9379 --verbose
