@@ -11,7 +11,7 @@ Three steps, chosen by measurement (2026-10-09, 44 questions, see README
               infobox rows kept as one line; references, see-also etc. dropped
   ranking     BM25 over those paragraphs, nudged towards leads and
               higher-ranked articles; the named article's opening paragraph
-              (infobox) first
+              first (its first prose paragraph, then the infobox)
 
 Names (2026-10-10) took answers in the output from 35/44 to 38/44 for the
 questions verbatim and from 36/43 to 38/43 for gemma4-e2b's own queries.
@@ -66,6 +66,8 @@ NOT_NAMES = set("""
 january february march april may june july august september october november
 december monday tuesday wednesday thursday friday saturday sunday
 """.split())
+# A number next to a name is part of it: "2010 FIFA World Cup", "Apollo 11".
+NUMBER = re.compile(r"^\d[\d.,-]*$")
 # Capitalised only because they open the query ("Describe Paris").
 OPENERS = set("""
 describe explain define summarise summarize list compare find search show
@@ -86,16 +88,24 @@ def fold(text: str) -> str:
 
 def names(query: str) -> list[str]:
     """What the query names: quoted phrases, and runs of capitalised words
-    ("Tao Lung", "Gulf of Mexico")."""
+    ("Tao Lung", "Gulf of Mexico") with the numbers next to them ("2010 FIFA
+    World Cup", "Apollo 11")."""
     found = [a or b for a, b in QUOTED.findall(query)]
     tokens = [re.sub(r"^\W+|\W+$", "", t) for t in QUOTED.sub(" , ", query).split()]
     if tokens and tokens[0].lower() in OPENERS:
         tokens[0] = ""
+
+    def capital(t: str) -> bool:
+        return t[:1].isupper() and t.lower() not in STOP | NOT_NAMES
+
     run: list[str] = []
     for i, token in enumerate(tokens + [""]):
-        if token[:1].isupper() and token.lower() not in STOP | NOT_NAMES:
+        after = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if capital(token):
             run.append(token)
-        elif run and token.lower() in CONNECTORS and tokens[i + 1:i + 2] and tokens[i + 1][:1].isupper():
+        elif run and token.lower() in CONNECTORS and after[:1].isupper():
+            run.append(token)
+        elif NUMBER.match(token) and (run or capital(after)):
             run.append(token)
         else:
             if run:
@@ -104,6 +114,15 @@ def names(query: str) -> list[str]:
                 found.append(" ".join(run))
             run = []
     return [n for n in found if fold(n).strip()]
+
+
+def forms(name: str) -> list[str]:
+    """The name, then without its leading and trailing numbers: "2010 FIFA
+    World Cup", "FIFA World Cup"."""
+    parts = name.split()
+    out = [parts, parts[1:] if NUMBER.match(parts[0]) else parts, parts[:-1] if NUMBER.match(parts[-1]) else parts]
+    out.append([t for t in parts if not NUMBER.match(t)])
+    return list(dict.fromkeys(" ".join(p) for p in out if p))
 
 
 def page_url(base: str, path: str) -> str:
@@ -249,16 +268,19 @@ class Wiki:
         named = self._named(query)
         # The article the query names comes first with its opening paragraph
         # (the infobox, if any): "Rembrandt birth date" matches no word of
-        # "Born: 15 July 1606".
-        opening = next((p for p in out if p.path == named and not p.section), None)
-        if opening is not None:
-            ranked.remove(opening)
-            ranked.insert(0, opening)
+        # "Born: 15 July 1606". After an infobox, the first prose paragraph
+        # goes in front of it: it says what the subject is ("HTTP (Hypertext
+        # Transfer Protocol) is ..."), which the infobox of HTTP never does.
+        lead = [p for p in out if p.path == named and not p.section]
+        opening = lead[1::-1] if lead and lead[0].text.startswith("Infobox: ") else lead[:1]
+        for p in reversed(opening):
+            ranked.remove(p)
+            ranked.insert(0, p)
         return ranked
 
     def _named(self, query: str) -> str | None:
         """The path of the article titled with the query's first name, if any."""
-        for name in names(query)[:1]:
+        for name in forms(names(query)[0]) if names(query) else []:
             path = name.replace(" ", "_")
             # "Who painted the Night Watch": The_Night_Watch, not Night_Watch.
             the = re.search(rf"\bthe\s+{re.escape(name)}", query, re.IGNORECASE)
@@ -316,7 +338,7 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
     shown = passages[:results]
     seen = fold(" ".join(f"{p.title} {p.text}" for p in shown))
     wanted = names(query)
-    missing = [n for n in wanted if fold(n) not in seen]
+    missing = [n for n in wanted if not any(fold(f) in seen for f in forms(n))]
     quoted = " or ".join(f'"{m}"' for m in missing)
     if missing and len(missing) == len(wanted):
         others = "; ".join(dict.fromkeys(p.title for p in shown))
