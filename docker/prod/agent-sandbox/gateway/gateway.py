@@ -332,12 +332,23 @@ def clean(raw: bytes) -> str:
     return "\n".join(line.rstrip("\r").rsplit("\r", 1)[-1] for line in text.split("\n"))
 
 
+# Stderr lines that report a failure; apt notices, git's "Cloning into" and
+# download progress go to stderr too.
+_ERRORISH = re.compile(
+    r"No such file|not found|cannot|can't|[Ee]rror|ERROR|[Ff]ailed|FAILED|[Dd]enied|[Ii]nvalid"
+    r"|[Ff]atal|Traceback|unexpected|[Uu]nable to|not permitted|[Ss]yntax|[Uu]sage:|unrecognized|missing"
+)
+
+
 @dataclass
 class Result:
     exit_code: int | None
     output: str
     seconds: float
     hung: bool
+    # Lines on stderr that report a failure, and the first of them.
+    errors: int = 0
+    first_error: str = ""
 
 
 async def execute(box: Sandbox, argv: list[str], timeout: int) -> Result:
@@ -347,6 +358,7 @@ async def execute(box: Sandbox, argv: list[str], timeout: int) -> Result:
     tail_cap = OUTPUT_LIMIT - head_cap
     head, tail = bytearray(), bytearray()
     total = 0
+    stderr = bytearray()
     started = time.monotonic()
     exe = await box.container.exec(cmd=argv, stdout=True, stderr=True, workdir=WORKDIR)
 
@@ -355,6 +367,8 @@ async def execute(box: Sandbox, argv: list[str], timeout: int) -> Result:
         while (message := await stream.read_out()) is not None:
             data = message.data
             total += len(data)
+            if message.stream == 2 and len(stderr) < 65536:
+                stderr.extend(data)
             room = head_cap - len(head)
             if room > 0:
                 head.extend(data[:room])
@@ -382,7 +396,11 @@ async def execute(box: Sandbox, argv: list[str], timeout: int) -> Result:
         output += f"[... {human(cut)} of output cut ...]\n"
     output += end
     box.used = time.monotonic()
-    return Result(None if info.get("Running") else info.get("ExitCode"), output.strip("\n"), seconds, hung)
+    lines = [line.strip() for line in clean(bytes(stderr)).splitlines() if _ERRORISH.search(line)]
+    return Result(
+        None if info.get("Running") else info.get("ExitCode"), output.strip("\n"), seconds, hung,
+        len(lines), lines[0][:120] if lines else "",
+    )
 
 
 # apt's "Unable to locate package X" and "Package 'X' has no installation
@@ -405,7 +423,10 @@ _APT_SEARCH = (
 # Asked how much disk it had, gemma4-e2b ran df and reported the host's 39 GB
 # free, with the limits stated in its first result long gone from view: it
 # follows the newest result, so these commands' results restate them.
-_HOST_VIEW = re.compile(r"\b(?:df|free|nproc|lscpu|vmstat|top|htop|duf)\b")
+_HOST_VIEW = re.compile(r"\b(?:df|free|nproc|lscpu|vmstat|top|htop|duf|swapon)\b|/proc/(?:meminfo|cpuinfo|swaps)")
+# gemma4-e2b took "Connection refused" from its own unstarted nginx for
+# "network restrictions in the sandbox".
+_REFUSED = re.compile(r"(?:localhost|127\.0\.0\.1|::1|0\.0\.0\.0)\S*[^\n]*(?:Connection refused|Could not connect)|(?:Connection refused|Couldn't connect to server)[^\n]*(?:localhost|127\.0\.0\.1)")
 
 
 async def limits_note(box: Sandbox, command: str) -> str:
@@ -522,11 +543,26 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         status = f"[timed out after {timeout}s and was stopped. Reads input? There is no keyboard: pipe it in (`printf '5\\n' | CMD`). Long jobs: nohup CMD > log 2>&1 &]"
     elif result.exit_code == 137:
         status = f"[killed (exit 137), most likely by the {human(MEMORY_SWAP)} memory limit, {result.seconds:.1f}s]"
+    elif result.exit_code == 0 and result.errors:
+        # A script whose last command succeeds exits 0 after any number of
+        # failures: gemma4-e2b ran its test of a backup script it had never
+        # written ("./backup_etc.sh: No such file or directory", exit 0 from
+        # the closing rm) and said the test passed.
+        lines = "1 error" if result.errors == 1 else f"{result.errors} errors"
+        status = (
+            f"[exit 0 from the last command, {result.seconds:.1f}s; but {lines} on stderr, the first:"
+            f" {result.first_error!r}. Earlier commands may have failed.]"
+        )
     else:
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s]"
     alternatives = "" if result.hung else await apt_alternatives(box, result.output)
     limits = await limits_note(box, command)
-    return "\n".join(part for part in (note, result.output, status, alternatives, limits) if part)
+    refused = (
+        "[Connection refused on the sandbox's own address: nothing listens on that port. Connections"
+        " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
+        if _REFUSED.search(result.output) else ""
+    )
+    return "\n".join(part for part in (note, result.output, status, alternatives, limits, refused) if part)
 
 
 @tool()
