@@ -76,7 +76,7 @@ INT = {"type": "integer"}
 # Schemas are hand-written: pydantic's titles cost tokens and tell a small
 # model nothing.
 TOOLS = [
-    (calculate, "Exact arithmetic: + - * / ^ %, sqrt, log, sin, factorial, pi; clock times and durations.", {
+    (calculate, "Exact arithmetic: + - * / ^ %, sqrt, log, sin, factorial, pi; clock times and durations (h, min, days).", {
         "properties": {"expression": {"type": "string", "description": "e.g. (17*23)^2, 15% of 80 or 06:40 - 2h - 45min"}},
         "required": ["expression"],
     }),

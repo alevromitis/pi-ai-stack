@@ -103,6 +103,7 @@ _CLOCK = re.compile(r"\b(\d{1,2}):([0-5]\d)(?::([0-5]\d))?\b")
 _H_M = re.compile(r"(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\s*(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)(?![a-z])", re.IGNORECASE)
 _HOURS = re.compile(r"(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)(?![a-z])", re.IGNORECASE)
 _MINUTES = re.compile(r"(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)(?![a-z])", re.IGNORECASE)
+_DAYS = re.compile(r"(\d+(?:\.\d+)?)\s*(?:days?|d)(?![a-z])", re.IGNORECASE)
 _BARE = re.compile(r"[+-]\s*\d+(?:\.\d+)?(?!\s*[*/(\d.])")
 
 
@@ -114,9 +115,10 @@ def _in_minutes(text: str) -> tuple[str, bool, bool]:
     out = _H_M.sub(lambda m: f"({m[1]}*60+{m[2]})", out)
     out = _HOURS.sub(lambda m: f"({m[1]}*60)", out)
     out = _MINUTES.sub(lambda m: f"({m[1]})", out)
+    out = _DAYS.sub(lambda m: f"({m[1]}*1440)", out)
     if out != text:
         # "06:40 - 2": hours or minutes? Only units say.
-        masked = _MINUTES.sub("T", _HOURS.sub("T", _H_M.sub("T", _CLOCK.sub("T", text))))
+        masked = _DAYS.sub("T", _MINUTES.sub("T", _HOURS.sub("T", _H_M.sub("T", _CLOCK.sub("T", text)))))
         if _BARE.search(masked):
             raise CalcError("add or subtract times as H:MM or with units (2h, 45min), not bare numbers")
     return out, clock, out != text
@@ -136,6 +138,10 @@ def _hm(minutes: float, clock: bool) -> str:
     h, rest = divmod(seconds, 3600)
     text = f"{sign}{h}:{rest // 60:02d}" + (f":{rest % 60:02d}" if rest % 60 else "")
     words = " ".join(part for part in (f"{h} h" if h else "", f"{rest // 60} min" if rest // 60 or not h else "") if part)
+    if h >= 24:
+        # "8,015 hours is about 334.79 days", worked out in the head (333.96).
+        d, hours = divmod(h, 24)
+        words += f" = {d} days {hours} h {rest // 60} min, or {seconds / 86400:.6g} days"
     return f"{text} ({sign}{words})"
 
 
