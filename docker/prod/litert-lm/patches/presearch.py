@@ -17,10 +17,14 @@ Which tool: wikipedia_search, or searxng_web_search for questions about now
 ("latest", "current", "today", prices, weather) or when Wikipedia is off.
 LibreChat appends "_mcp_<server>" to tool names, so names match by prefix.
 
-Anything else goes to the model as before: messages that mention "you",
-"I" or "my", or (later in a chat) "he", "it", "that"..., since they depend
-on context the query wouldn't carry; requests for advice or how-tos; text
-with URLs or code; long or multi-line messages; non-Latin text.
+Only a chat's first message is searched: the query is the message alone,
+and later ones lean on the chat for their subject ("What's the best time
+to visit?" after "Tell me about Kyoto" found the article "What"); the
+model, which sees the chat, searches for those itself. Anything else goes
+to the model as before too: messages that mention "you", "I" or "my",
+since they depend on context the query wouldn't carry; requests for advice
+or how-tos; text with URLs or code; long or multi-line messages; non-Latin
+text.
 
 The prefix cache (prefix_cache.py) accepts the server's tool-call turn, so
 the follow-up request still prefills only the new messages.
@@ -70,12 +74,6 @@ _YES_NO = re.compile(r"^(?:is|are|was|were|did|does|has|have|had)\b.*\?$", re.IG
 _ALWAYS_PERSONAL = re.compile(
     r"\b(?:(?i:you|your|yours|yourself|i'm|i've|me|my|mine|myself|we|our|ours)|i|us)\b"
     r"|(?:^|\b[a-z]+\W+)I\b|\bI\s+(?!of\b)[a-z]"
-)
-# Point back into the chat; only fine in its first message.
-_REFERS_BACK = re.compile(
-    r"\b(?:he|she|it|they|him|her|his|hers|its|their|theirs|them"
-    r"|this|that|these|those|there|above|previous|earlier)\b",
-    re.IGNORECASE,
 )
 _NOT_LOOKUP = re.compile(
     r"\b(?:should|best way|recommend|opinion|think|feel|why|how to|how do|how can"
@@ -169,16 +167,14 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
     calc = _tool(body, "calculate", "expression")
     return (calc, {"expression": math}, "arithmetic") if calc else None
 
-  later = any(
-      isinstance(m, dict) and m.get("role") == "assistant" for m in messages[:-1]
-  )
+  # Later messages take their subject from the chat, which the query lacks.
+  if any(isinstance(m, dict) and m.get("role") == "assistant" for m in messages[:-1]):
+    return None
   if not (asked or _QUESTION.match(text) or _YES_NO.match(text)):
     return None
   if _ALWAYS_PERSONAL.search(text) or _NOT_LOOKUP.search(text):
     return None
   if _OPERATOR.search(text) or _NUMBERS.search(text):
-    return None
-  if later and _REFERS_BACK.search(text):
     return None
   query = text.rstrip(" ?.!")
   if len(query) < 3:
