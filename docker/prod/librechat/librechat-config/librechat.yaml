@@ -168,6 +168,29 @@ interface:
   parameters: true
   presets: true
 
+# Without this block LibreChat skips memory entirely - nothing is saved or
+# added to prompts - yet the Memories panel still shows (it is hidden only
+# by `disabled: true`). Saved memories go at the end of every chat's system
+# prompt, so a change re-prefills that chat once.
+memory:
+  # Total for all saved memories (o200k tokens; Gemma's count is similar).
+  # Small, since every new chat prefills them.
+  tokenLimit: 1000
+  # The memory agent: with each user message, a second LiteRT-LM request
+  # with set_memory/delete_memory tools. A real run evicts litert-lm-1's
+  # prefix cache, so the reply re-prefills the whole chat; litert-lm's
+  # memory gate (LITERT_MEMORY_GATE) answers it without the model unless the
+  # newest message asks to remember or forget something. Opt-in in v0.8.7.
+  agent:
+    enabled: true
+    provider: 'LiteRT-LM'
+    model: 'gemma4-e2b'
+  # What the agent sees: the request plus the exchange before it, so
+  # "remember that" can refer to the previous reply. Capped (default 12000)
+  # so a long reply can't cost minutes of prefill.
+  messageWindowSize: 3
+  maxInputTokens: 1500
+
 fileConfig:
   # "Upload as Text" accepts any MIME type by default and reads binaries
   # (images, audio, archives) as raw bytes - a 38 KB webp became ~29k tokens

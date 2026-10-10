@@ -65,12 +65,15 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 # patches/prefix_cache.py keeps the last conversation and prefills only the
 # new messages. Also honours `max_tokens`. patches/apply_reasoning.py streams
 # Gemma's thinking as reasoning_content (upstream generates and discards it).
+# patches/memory_gate.py answers LibreChat's memory agent without the engine
+# unless the user asked to remember or forget something.
 # Fails the build on upstream drift.
 COPY patches/ /tmp/patches/
 RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_handler.py')")" \
-    && cp /tmp/patches/prefix_cache.py "$d/" \
+    && cp /tmp/patches/prefix_cache.py /tmp/patches/memory_gate.py "$d/" \
     && python3 /tmp/patches/apply_prefix_cache.py "$d" \
     && python3 /tmp/patches/apply_reasoning.py "$d" \
+    && python3 /tmp/patches/apply_memory_gate.py "$d" \
     && rm -rf /tmp/patches
 
 WORKDIR /app
