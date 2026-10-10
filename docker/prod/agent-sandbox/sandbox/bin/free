@@ -1,0 +1,35 @@
+#!/bin/sh
+# This container's memory and swap (its cgroup limits and use), not the
+# host's: the real free reads /proc/meminfo, which shows the whole machine,
+# and gemma4-e2b reported the Pi's 8 GB as the sandbox's.
+# Unknown options, and no limit, go to the real free (/usr/bin/free).
+cg=/sys/fs/cgroup
+limit=$(cat $cg/memory.max 2>/dev/null)
+{ [ -z "$limit" ] || [ "$limit" = max ]; } && exec /usr/bin/free "$@"
+unit=1024 human=
+for a in "$@"; do
+  case "$a" in
+    -b|--bytes) unit=1 ;;
+    -k|--kibi) unit=1024 ;;
+    -m|--mebi) unit=1048576 ;;
+    -g|--gibi) unit=1073741824 ;;
+    -h|--human) human=1 ;;
+    -t|--total|-w|--wide|-l|--lohi) ;;
+    *) exec /usr/bin/free "$@" ;;
+  esac
+done
+awk -v unit="$unit" -v human="$human" -v mt="$limit" -v mu="$(cat $cg/memory.current)" \
+    -v st="$(cat $cg/memory.swap.max 2>/dev/null || echo 0)" -v su="$(cat $cg/memory.swap.current 2>/dev/null || echo 0)" '
+function f(b) {
+  if (!human) return int(b / unit)
+  if (b >= 1073741824) return sprintf("%.1fGi", b / 1073741824)
+  if (b >= 1048576) return sprintf("%.0fMi", b / 1048576)
+  return sprintf("%.0fKi", b / 1024)
+}
+BEGIN {
+  if (st == "max") st = 0
+  printf "%-7s%12s%12s%12s\n", "", "total", "used", "free"
+  printf "%-7s%12s%12s%12s\n", "Mem:", f(mt), f(mu), f(mt - mu)
+  printf "%-7s%12s%12s%12s\n", "Swap:", f(st), f(su), f(st - su)
+  print "(this container'"'"'s limits; the whole machine: /usr/bin/free)"
+}'

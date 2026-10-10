@@ -1,0 +1,12 @@
+#!/bin/sh
+# The CPUs this container may use (its cgroup cpu.max quota), not the
+# host's: asked how many CPUs it had, gemma4-e2b answered 4, the Pi's.
+# --all, and anything without a quota, goes to the real nproc.
+case " $* " in *" --all "*|*" --help "*|*" --version "*) exec /usr/bin/nproc "$@" ;; esac
+read -r quota period < /sys/fs/cgroup/cpu.max 2>/dev/null || exec /usr/bin/nproc "$@"
+[ "$quota" = max ] && exec /usr/bin/nproc "$@"
+n=$(( (quota + period - 1) / period ))
+host=$(/usr/bin/nproc "$@")
+[ "$n" -gt "$host" ] && n=$host
+[ "$n" -lt 1 ] && n=1
+echo "$n"

@@ -108,6 +108,9 @@ RUN printf '%s\n' \
         > /usr/local/bin/systemctl \
     && chmod 755 /usr/local/bin/systemctl
 
+# nproc and free report this container's cgroup limits, not the host's.
+COPY --chmod=755 bin/nproc bin/free /usr/local/bin/
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]
