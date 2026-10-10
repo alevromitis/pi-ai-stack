@@ -88,7 +88,7 @@ TOOLS = [
         "properties": {"date": DATE, "days": INT, "weeks": INT, "months": INT, "years": INT},
         "required": ["date"],
     }),
-    (count_text, "Count characters, letters and words in a text, or how often a letter or string appears.", {
+    (count_text, "Count characters, letters, words, vowels and consonants in a text, or how often a letter or string appears.", {
         "properties": {"text": {"type": "string"}, "find": {"type": "string", "description": "letter or string to count"}},
         "required": ["text"],
     }),

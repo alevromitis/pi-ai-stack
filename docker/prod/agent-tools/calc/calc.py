@@ -178,10 +178,11 @@ def date_diff(start: str, end: str, today: datetime.date) -> str:
     parts = [_plural(n, u) for n, u in ((years, "year"), (months, "month"), (rest, "day")) if n]
     weeks, wdays = divmod(abs(days), 7)
     sign = "-" if days < 0 else ""
+    # Years first: given "15126 days (...; 41 years, ...)" the model said 40.
+    span = ", ".join(parts) or "0 days"
     return (
-        f"From {_describe(a)} to {_describe(b)}: {sign}{_plural(abs(days), 'day')}"
-        f" ({_plural(weeks, 'week')} {_plural(wdays, 'day')}"
-        + (f"; {', '.join(parts)}" if parts else "") + ")."
+        f"From {_describe(a)} to {_describe(b)}: {sign}{span}"
+        f" (= {sign}{_plural(abs(days), 'day')}, or {_plural(weeks, 'week')} {_plural(wdays, 'day')})."
         + (" The end is before the start." if days < 0 else "")
     )
 
@@ -207,7 +208,14 @@ def date_add(date: str, days: int, weeks: int, months: int, years: int, today: d
 def count_text(text: str, find: str = "") -> str:
     letters = sum(c.isalpha() for c in text)
     words = len(re.findall(r"[^\W_]+(?:['’-][^\W_]+)*", text))
-    out = f"{text!r}: {_plural(len(text), 'character')}, {_plural(letters, 'letter')}, {_plural(words, 'word')}."
+    # The model counted "y" as a vowel in "encyclopedia" and said 6.
+    vowels = sum(c in "aeiou" for c in text.lower())
+    consonants = sum(c.isascii() and c.isalpha() and c not in "aeiou" for c in text.lower())
+    out = (
+        f"{text!r}: {_plural(len(text), 'character')}, {_plural(letters, 'letter')}, {_plural(words, 'word')}"
+        + (f"; {_plural(vowels, 'vowel')} (a, e, i, o, u) and {_plural(consonants, 'consonant')}" if consonants or vowels else "")
+        + "."
+    )
     if find:
         n = text.lower().count(find.lower())
         where = ""
