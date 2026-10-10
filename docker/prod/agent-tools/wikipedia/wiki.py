@@ -3,19 +3,27 @@
 Three steps, chosen by measurement (2026-10-09, 44 questions, see README
 "agent-tools"):
 
-  candidates  libzim's title suggestions first (named things: "Eiffel
+  candidates  the article titled with the first name the query gives,
+              then libzim's title suggestions (named things: "Eiffel
               Tower" beats "Eiffel Tower replicas"), then the ZIM's Xapian
               full-text index with every word, topped up with any word
   passages    the top articles split into lead / sections / paragraphs,
               infobox rows kept as one line; references, see-also etc. dropped
   ranking     BM25 over those paragraphs, nudged towards leads and
-              higher-ranked articles
+              higher-ranked articles; the named article's opening paragraph
+              (infobox) first
+
+Names (2026-10-10) took answers in the output from 35/44 to 38/44 for the
+questions verbatim and from 36/43 to 38/43 for gemma4-e2b's own queries.
+render() also says when no passage names what the query names: gemma4-e2b
+otherwise answers "Tao Lung" from a page about Tan Tao-liang.
 """
 
 from __future__ import annotations
 
 import math
 import re
+import unicodedata
 import urllib.parse
 from collections import Counter
 from dataclasses import dataclass, field
@@ -50,10 +58,52 @@ called name named whose year years tell give many much
 """.split())
 TOKEN = re.compile(r"[\wÀ-ɏ]+")
 CITATION = re.compile(r"\[\s*(\d+|[a-z]|citation needed|note \d+|update)\s*\]")
+QUOTED = re.compile(r'"([^"]{2,80})"|\u201c([^\u201d]{2,80})\u201d')
+# Lowercase words allowed inside a name: "Leonardo da Vinci", "Gulf of Mexico".
+CONNECTORS = {"of", "the", "de", "da", "del", "der", "di", "du", "la", "le", "van", "von", "bin", "al", "y", "and"}
+# Capitalised but not names: they break a run ("Chancellor of Germany May 2025").
+NOT_NAMES = set("""
+january february march april may june july august september october november
+december monday tuesday wednesday thursday friday saturday sunday
+""".split())
+# Capitalised only because they open the query ("Describe Paris").
+OPENERS = set("""
+describe explain define summarise summarize list compare find search show
+look get history biography info information
+""".split())
 
 
 def words(text: str) -> list[str]:
     return [t for t in TOKEN.findall(text.lower()) if t not in STOP]
+
+
+def fold(text: str) -> str:
+    """Lowercase, accents and punctuation dropped, space-padded: " tan tao liang "."""
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c)).lower()
+    return " " + " ".join(re.findall(r"[^\W_]+", text)) + " "
+
+
+def names(query: str) -> list[str]:
+    """What the query names: quoted phrases, and runs of capitalised words
+    ("Tao Lung", "Gulf of Mexico")."""
+    found = [a or b for a, b in QUOTED.findall(query)]
+    tokens = [re.sub(r"^\W+|\W+$", "", t) for t in QUOTED.sub(" , ", query).split()]
+    if tokens and tokens[0].lower() in OPENERS:
+        tokens[0] = ""
+    run: list[str] = []
+    for i, token in enumerate(tokens + [""]):
+        if token[:1].isupper() and token.lower() not in STOP | NOT_NAMES:
+            run.append(token)
+        elif run and token.lower() in CONNECTORS and tokens[i + 1:i + 2] and tokens[i + 1][:1].isupper():
+            run.append(token)
+        else:
+            if run:
+                # A possessive ends a name: "Tolkien's books", not "Rubik's Cube".
+                run[-1] = re.sub(r"(?:'s|\u2019s)$", "", run[-1])
+                found.append(" ".join(run))
+            run = []
+    return [n for n in found if fold(n).strip()]
 
 
 def page_url(base: str, path: str) -> str:
@@ -170,11 +220,17 @@ class Wiki:
             out.setdefault(entry.path, entry.title)
 
     def candidates(self, query: str, limit: int = 20) -> list[tuple[str, str]]:
-        """[(path, title)]: title suggestions, then all words, then any word."""
+        """[(path, title)]: articles titled with a name the query gives, title
+        suggestions, then all words, then any word."""
         terms = words(query) or TOKEN.findall(query.lower())
         if not terms:
             return []
         found: dict[str, str] = {}
+        # "When was the Eiffel Tower completed": suggestions rank its replicas
+        # first. Only the first name: "Epirus region in Greece" needs no Greece.
+        named = self._named(query)
+        if named:
+            found[named] = self.archive.get_entry_by_path(named).title
         self._collect(self.suggester.suggest(" ".join(terms)).getResults(0, 3), found, limit)
         for text in (" ".join(terms), " OR ".join(terms)):
             if len(found) >= limit:
@@ -189,7 +245,29 @@ class Wiki:
             html = bytes(self._resolve(path).get_item().content).decode("utf-8", "replace")
             paras = [(s.title, p) for s in sections(html) for p in s.paras][:per_article]
             out.extend(Passage(title, path, section, text, rank) for section, text in paras)
-        return bm25(query, out)
+        ranked = bm25(query, out)
+        named = self._named(query)
+        # The article the query names comes first with its opening paragraph
+        # (the infobox, if any): "Rembrandt birth date" matches no word of
+        # "Born: 15 July 1606".
+        opening = next((p for p in out if p.path == named and not p.section), None)
+        if opening is not None:
+            ranked.remove(opening)
+            ranked.insert(0, opening)
+        return ranked
+
+    def _named(self, query: str) -> str | None:
+        """The path of the article titled with the query's first name, if any."""
+        for name in names(query)[:1]:
+            path = name.replace(" ", "_")
+            # "Who painted the Night Watch": The_Night_Watch, not Night_Watch.
+            the = re.search(rf"\bthe\s+{re.escape(name)}", query, re.IGNORECASE)
+            for candidate in ([f"The_{path}"] if the else []) + [path]:
+                try:
+                    return self._resolve(candidate).path
+                except KeyError:
+                    continue
+        return None
 
 
 def bm25(query: str, passages: list[Passage], k1: float = 1.2, b: float = 0.75) -> list[Passage]:
@@ -225,12 +303,34 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
 
     Measured 2026-10-10 (gemma4-e2b, 12 questions): a link under each
     passage was cited 0/12; this line plus pi-chat's prompt rule, 11/12.
+
+    When no passage names anything the query names, the passages are left
+    out: shown with a warning, gemma4-e2b still answered "Tao Lung" from
+    Tan Tao-liang's films. 0 of 103 real questions and model queries hit
+    this (2026-10-10).
     """
     lines = [f"Wikipedia (offline copy, {date[:7]}) for: {query}"]
     if not passages:
         lines.append("No results.")
         return "\n".join(lines)
     shown = passages[:results]
+    seen = fold(" ".join(f"{p.title} {p.text}" for p in shown))
+    wanted = names(query)
+    missing = [n for n in wanted if fold(n) not in seen]
+    quoted = " or ".join(f'"{m}"' for m in missing)
+    if missing and len(missing) == len(wanted):
+        others = "; ".join(dict.fromkeys(p.title for p in shown))
+        lines.append(
+            f"Nothing about {quoted}: no article found mentions it. The closest are"
+            f" about other things ({others}), so they don't answer this. Search again"
+            " with other words, or say you don't know."
+        )
+        return "\n".join(lines)
+    if missing:
+        lines.append(
+            f"Note: no passage below mentions {quoted}. Don't answer about it from"
+            " passages about something else."
+        )
     for i, p in enumerate(shown, 1):
         where = p.title + (f" › {p.section}" if p.section else "")
         lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}")
