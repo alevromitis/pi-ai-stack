@@ -34,7 +34,8 @@ replacements = {
         (
             "    text_output = \"\".join(text_parts)\n",
             "    text_output = citations.apply(\n"
-            "        handler, \"\".join(text_parts), bool(tool_calls)\n"
+            "        handler, citations.Scrub().feed(\"\".join(text_parts)),\n"
+            "        bool(tool_calls),\n"
             "    )\n",
         ),
     ],
@@ -49,12 +50,13 @@ replacements = {
             "      reasoning_tokens = 0\n",
             "      has_tool_calls = False\n"
             "      reasoning_tokens = 0\n"
-            "      cite = citations.stream_filter(self)\n",
+            "      cite = citations.stream_filter(self)\n"
+            "      scrub = citations.Scrub()\n",
         ),
         (
             "        text_output = str(chunk)\n"
             "        if text_output:\n",
-            "        text_output = str(chunk)\n"
+            "        text_output = scrub.feed(str(chunk))\n"
             "        if cite is not None:\n"
             "          text_output = cite.feed(text_output)\n"
             "        if text_output:\n",

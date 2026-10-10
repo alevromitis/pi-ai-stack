@@ -342,6 +342,36 @@ class Filter:
     return text + sep + line
 
 
+# Gemma's control tokens: "<|channel>", "<channel|>", "<|tool_call>", "<|"|>".
+_MARKUP = re.compile(r"<\|[^<>|\s]{1,20}\|?>|<[^<>|\s]{1,20}\|>")
+
+
+class Scrub:
+  """Drops Gemma's control tokens that leak into the reply text ("...
+  <channel|>Ana is 14 years old now."), and raw tool calls with them: with
+  no tool offered, the model may call its trained-in search, and the reply
+  would be "<|tool_call>call:google_search{...}<tool_call|>". Each token
+  arrives whole in one chunk; a call spans many, so its state carries over.
+  Runs whether citations are on or off."""
+
+  def __init__(self) -> None:
+    self._in_call = False
+
+  def feed(self, text: str) -> str:
+    out, pos = [], 0
+    for token in _MARKUP.finditer(text):
+      if not self._in_call:
+        out.append(text[pos:token.start()])
+      if token.group(0) == "<|tool_call>":
+        self._in_call = True
+      elif token.group(0) == "<tool_call|>":
+        self._in_call = False
+      pos = token.end()
+    if not self._in_call:
+      out.append(text[pos:])
+    return "".join(out)
+
+
 def stream_filter(handler: Any) -> Filter | None:
   """The Filter for this request, unless disabled (one use)."""
   sources = handler.__dict__.pop("citation_sources", None)
