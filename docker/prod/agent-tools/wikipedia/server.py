@@ -1,8 +1,8 @@
 """Offline English Wikipedia for LibreChat agents, from a Kiwix ZIM file.
 
 One tool, wikipedia_search: the best 5 passages for a query from the top 3
-articles, each with its en.wikipedia.org link (~2.4k characters, ~600
-tokens). Measured on rpi 2026-10-09: ~0.2 s a search with a cold page
+articles, each with its link (~2.4k characters, ~600 tokens): the article
+on kiwix-serve when WIKIPEDIA_LINK_BASE points there, else en.wikipedia.org. Measured on rpi 2026-10-09: ~0.2 s a search with a cold page
 cache, ~340 MB RSS. No network: the ZIM is a read-only bind mount.
 
 Endpoint: /mcp (Streamable HTTP, stateless, JSON responses); /healthz.
@@ -39,6 +39,7 @@ def env(name: str, default: str | None = None) -> str:
 RESULTS = int(env("WIKIPEDIA_RESULTS", "5"))
 ARTICLES = int(env("WIKIPEDIA_ARTICLES", "3"))
 PASSAGE_CHARS = int(env("WIKIPEDIA_PASSAGE_CHARS", "500"))
+LINK_BASE = env("WIKIPEDIA_LINK_BASE", "https://en.wikipedia.org/wiki/")
 MAX_QUERY_CHARS = 300
 
 log = logging.getLogger("wikipedia")
@@ -53,7 +54,7 @@ mcp = MCPServer("wikipedia", log_level="WARNING")
 
 def _search(query: str) -> str:
     with lock:
-        return render(query, wiki.passages(query, ARTICLES), wiki.date, RESULTS, PASSAGE_CHARS)
+        return render(query, wiki.passages(query, ARTICLES), wiki.date, RESULTS, PASSAGE_CHARS, LINK_BASE)
 
 
 async def wikipedia_search(query: str) -> str:

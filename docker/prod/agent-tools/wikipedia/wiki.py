@@ -56,8 +56,9 @@ def words(text: str) -> list[str]:
     return [t for t in TOKEN.findall(text.lower()) if t not in STOP]
 
 
-def wiki_url(title: str) -> str:
-    return "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_"), safe="_()',-.")
+def page_url(base: str, path: str) -> str:
+    """An article's link: base is a kiwix-serve /content/<name>/ or en.wikipedia.org/wiki/."""
+    return base + urllib.parse.quote(path, safe="/_()',-.")
 
 
 @dataclass
@@ -70,6 +71,7 @@ class Section:
 @dataclass
 class Passage:
     title: str
+    path: str  # the ZIM entry, e.g. "Mitsotakis_family"
     section: str
     text: str
     article_rank: int
@@ -186,7 +188,7 @@ class Wiki:
         for rank, (path, title) in enumerate(self.candidates(query)[:articles]):
             html = bytes(self._resolve(path).get_item().content).decode("utf-8", "replace")
             paras = [(s.title, p) for s in sections(html) for p in s.paras][:per_article]
-            out.extend(Passage(title, section, text, rank) for section, text in paras)
+            out.extend(Passage(title, path, section, text, rank) for section, text in paras)
         return bm25(query, out)
 
 
@@ -218,11 +220,11 @@ def trim(text: str, limit: int) -> str:
     return (cut[: stop + 1] if stop > limit * 0.6 else cut.rstrip()) + " …"
 
 
-def render(query: str, passages: list[Passage], date: str, results: int, chars: int) -> str:
+def render(query: str, passages: list[Passage], date: str, results: int, chars: int, link_base: str) -> str:
     lines = [f"Wikipedia (offline copy, {date[:7]}) for: {query}"]
     if not passages:
         lines.append("No results.")
     for i, p in enumerate(passages[:results], 1):
         where = p.title + (f" › {p.section}" if p.section else "")
-        lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}\n{wiki_url(p.title)}")
+        lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}\n{page_url(link_base, p.path)}")
     return "\n".join(lines)

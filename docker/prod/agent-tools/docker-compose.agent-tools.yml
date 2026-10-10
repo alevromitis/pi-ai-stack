@@ -3,7 +3,8 @@ name: agent-tools
 # Topology
 # --------
 #   MCP servers for LibreChat agents, reached over Streamable HTTP at
-#   http://<container>:<port>/mcp. Nothing is published on the host.
+#   http://<container>:<port>/mcp, none published on the host. kiwix-serve,
+#   the one web page here, is published so mcp-wikipedia's links open.
 #
 #   internal  agent-tools-internal (internal: true). LibreChat joins it as
 #             external. Shell and filesystem live ONLY here: no internet,
@@ -12,16 +13,18 @@ name: agent-tools
 #             page reader need the internet. Docker NAT also reaches the
 #             LAN; see README "Agent tools".
 #   searxng   searxng-external (owned by the searxng stack, must be up).
+#   web       agent-tools-web. kiwix-serve alone, for its published port.
 #
 #   mcp-shell       :8000  allowlisted commands, cwd /workspace
 #   mcp-filesystem  :8000  read/write confined to /workspace
 #   mcp-playwright  :8931  headless Chromium; files to /workspace/playwright
 #   mcp-searxng     :8080  web search via searxng-1 + web_url_read (no workspace)
 #   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only
+#   kiwix-serve     :8080  the same ZIM as web pages, published ${KIWIX_PORT}
 #
 # Shell, filesystem and Playwright share ${AGENT_WORKSPACE_DIR} as
 # /workspace (uid 1000), the only host path they can touch. mcp-wikipedia
-# sees only ${WIKIPEDIA_ZIM_DIR}, read-only.
+# and kiwix-serve see only ${WIKIPEDIA_ZIM_DIR}, read-only.
 
 x-sandbox: &sandbox
   restart: unless-stopped
@@ -229,6 +232,9 @@ services:
       WIKIPEDIA_RESULTS: "5"
       WIKIPEDIA_ARTICLES: "3"
       WIKIPEDIA_PASSAGE_CHARS: "500"
+      # Each passage's link: the article on kiwix-serve below, not on
+      # en.wikipedia.org, so it matches the snapshot the answer came from.
+      WIKIPEDIA_LINK_BASE: ${WIKIPEDIA_LINK_BASE:?set WIKIPEDIA_LINK_BASE in .env}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 30s
@@ -256,6 +262,48 @@ services:
           # than create an empty directory on the root disk.
           create_host_path: false
 
+  kiwix-serve:
+    <<: *sandbox
+    # Pinned (TAG in .env). Serves the ZIM mcp-wikipedia searches, so the
+    # links in its results open the same snapshot: /content/<name>/<path>.
+    image: ghcr.io/kiwix/kiwix-serve:${KIWIX_SERVE_TAG:?set KIWIX_SERVE_TAG in .env}
+    container_name: kiwix-serve-1
+    # Skip the image's start.sh (downloads, unquoted args); init: true reaps.
+    entrypoint: ["kiwix-serve"]
+    command:
+      - --port=8080
+      # Also serve it as wikipedia_en_all_nopic (no date), so links in old
+      # chats keep working after the snapshot is updated.
+      - --nodatealiases
+      # The Pi's CPU is the LLM's; 2 is plenty for one reader.
+      - --threads=2
+      - /zim/${WIKIPEDIA_ZIM_FILE:?set WIKIPEDIA_ZIM_FILE in .env}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          # ~245 MB RSS measured after a few pages.
+          memory: 512M
+          pids: 64
+    # Public content, read-only: on the LAN and tailnet like the other UIs.
+    ports:
+      - "${KIWIX_PORT:?set KIWIX_PORT in .env}:8080"
+    networks:
+      - web
+    volumes:
+      - type: bind
+        source: ${WIKIPEDIA_ZIM_DIR:?set WIKIPEDIA_ZIM_DIR in .env}
+        target: /zim
+        read_only: true
+        bind:
+          create_host_path: false
+
 networks:
   internal:
     name: agent-tools-internal
@@ -263,6 +311,9 @@ networks:
     internal: true
   egress:
     name: agent-tools-egress
+    driver: bridge
+  web:
+    name: agent-tools-web
     driver: bridge
   searxng:
     # Owned by searxng stack. Declared external so we join it (not duplicate).
