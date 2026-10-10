@@ -21,8 +21,9 @@ Only a chat's first message is searched: the query is the message alone,
 and later ones lean on the chat for their subject ("What's the best time
 to visit?" after "Tell me about Kyoto" found the article "What"); the
 model, which sees the chat, searches for those itself. Anything else goes
-to the model as before too: messages that mention "you", "I" or "my",
-since they depend on context the query wouldn't carry; requests for advice
+to the model as before too: messages that mention "you", "I" or "my", or
+whose subject is only "it", "he", "that"... with no name ("How long is
+it?"), since they depend on context the query wouldn't carry; requests for advice
 or how-tos; text with URLs or code; long or multi-line messages; non-Latin
 text.
 
@@ -75,6 +76,14 @@ _ALWAYS_PERSONAL = re.compile(
     r"\b(?:(?i:you|your|yours|yourself|i'm|i've|me|my|mine|myself|we|our|ours)|i|us)\b"
     r"|(?:^|\b[a-z]+\W+)I\b|\bI\s+(?!of\b)[a-z]"
 )
+# A subject that only points elsewhere ("How long is it?"): searched as it
+# stands, it found the song "Long, Long, Long". Fine next to a name: "How tall
+# is the Eiffel Tower and when was it built?".
+_POINTER = re.compile(
+    r"\b(?:he|she|it|they|him|her|his|its|their|them|this|that|these|those)\b",
+    re.IGNORECASE,
+)
+_NAME = re.compile(r"(?<=\S)\s+[A-Z]")
 _NOT_LOOKUP = re.compile(
     r"\b(?:should|best way|recommend|opinion|think|feel|why|how to|how do|how can"
     r"|how should|write|rewrite|translate|summari[sz]e|explain|compare|difference"
@@ -175,6 +184,8 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
   if _ALWAYS_PERSONAL.search(text) or _NOT_LOOKUP.search(text):
     return None
   if _OPERATOR.search(text) or _NUMBERS.search(text):
+    return None
+  if _POINTER.search(text) and not _NAME.search(text):
     return None
   query = text.rstrip(" ?.!")
   if len(query) < 3:
