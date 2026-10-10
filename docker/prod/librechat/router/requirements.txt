@@ -1,0 +1,4 @@
+# Direct dependencies, pinned; bump deliberately.
+aiohttp==3.14.4
+pymongo==4.18.3
+pyyaml==6.0.3

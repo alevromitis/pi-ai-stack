@@ -1,0 +1,57 @@
+# Qwen3.5-9B on the workstation's Arc B570 (llama.cpp, Vulkan), for
+# LibreChat on rpi. A systemd *user* unit: it runs while the user is logged
+# in; when it is down, librechat-router-1 on rpi answers with Gemma on the Pi.
+#
+# Install (README "Qwen on the workstation"):
+#   install -Dm644 llama-qwen.service ~/.config/systemd/user/llama-qwen.service
+#   systemctl --user daemon-reload && systemctl --user enable --now llama-qwen
+#
+# Needs the Arch `llama-cpp` package (ggml-vulkan), the model at
+# ~/models/Qwen3.5-9B-Q4_K_M.gguf, and ~/.config/llama-qwen/api-keys (mode
+# 600, one key per line; the same key is QWEN_API_KEY in librechat's
+# .env.router).
+
+[Unit]
+Description=llama-server: Qwen3.5-9B for LibreChat
+After=network-online.target
+
+[Service]
+# Flags, 2026-10-10 (Arc B570 10 GB; ~8 GB free beside the desktop):
+#   --host        the tailnet address only; rpi reaches it over Tailscale.
+#                 Fails until tailscaled has the address, hence Restart.
+#   -ngl 99       every layer on the GPU (~4.9 GB).
+#   -fa off       flash attention is slow on this Vulkan build: at 16k depth
+#                 41 vs 30 tok/s generation, 841 vs 291 tok/s prefill.
+#   -c 65536      64k context. f16 KV (2 GiB) + the non-FA attention buffer
+#                 leave ~0.7 GB VRAM free. A q8_0 cache isn't possible with
+#                 FA off: V needs FA, and a q8_0 K adds a 4.5 GB dequant
+#                 buffer.
+#   -np 1         one slot: the whole context for one chat; requests queue.
+#   --ctx-checkpoints / --checkpoint-min-step  Qwen3.5's DeltaNet layers
+#                 can't rewind, so reusing a chat's cache on the next turn
+#                 needs a saved state near the end of the last prompt
+#                 (~50 MB host RAM each; at most 8).
+#   --cache-ram   host-RAM prompt cache, so a title request doesn't throw
+#                 away the chat's cache. Kept small: the host is short of RAM.
+#   sampling      Qwen's recommendation for thinking mode, general tasks
+#                 (model card): temp 1.0, top_p 0.95, top_k 20, min_p 0,
+#                 presence_penalty 1.5. LibreChat sends its own per request.
+#   --jinja       the model's chat template: thinking (as reasoning_content)
+#                 and tool calls (Qwen3-Coder XML, parsed to OpenAI tool_calls).
+ExecStart=/usr/bin/llama-server \
+    --model %h/models/Qwen3.5-9B-Q4_K_M.gguf \
+    --alias qwen3.5-9b \
+    --host <workstation-tailnet-ip> --port 8091 \
+    --api-key-file %h/.config/llama-qwen/api-keys \
+    -ngl 99 -fa off -c 65536 -np 1 \
+    --ctx-checkpoints 8 --checkpoint-min-step 1024 --cache-ram 1024 \
+    --jinja \
+    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5 \
+    --no-webui
+Restart=always
+RestartSec=15
+# The first process the OOM killer takes: the desktop and other work matter more.
+OOMScoreAdjust=500
+
+[Install]
+WantedBy=default.target

@@ -52,6 +52,40 @@ endpoints:
           prompt: 0
           completion: 0
           context: 13312
+    # Qwen3.5-9B on the workstation's GPU (workstation/llama-qwen), through
+    # librechat-router-1 (router/router.py). While the workstation is off or
+    # its server down, the router sends each request to litert-lm-1 as the
+    # E2B - Thinker preset would. The router is internal and needs no key;
+    # the workstation's key is in .env.router.
+    - name: 'Qwen'
+      apiKey: 'router'
+      baseURL: 'http://librechat-router-1:8000/v1'
+      models:
+        fetch: false
+        default:
+          - 'qwen3.5-9b'
+      titleConvo: true
+      titleModel: 'current_model'
+      # llama-server has one slot: a title request during the reply would
+      # queue the reply behind it.
+      titleTiming: 'final'
+      modelDisplayLabel: 'Qwen3.5 9B'
+      # Qwen's recommended thinking-mode sampling (model card): temperature
+      # 1.0, top_p 0.95, top_k 20, min_p 0, presence_penalty 1.5. The
+      # parameters panel has no top_k/min_p, so they go on every request;
+      # the rest are set per preset or spec. The router replaces all of them
+      # with the preset's when Gemma answers.
+      addParams:
+        top_k: 20
+        min_p: 0
+      # llama-server's window is 65536 Qwen tokens (-c in the unit), and
+      # LibreChat counts with tiktoken: 61440 leaves headroom for the
+      # mismatch. Rates 0 (local).
+      tokenConfig:
+        'qwen3.5-9b':
+          prompt: 0
+          completion: 0
+          context: 61440
 
 # Web search for agents/chat. LibreChat's built-in webSearch can't be used:
 # v0.8.7 (and v0.8.8) refuse to enable it without a scraper (Firecrawl, Serper
@@ -217,19 +251,63 @@ fileConfig:
       - '^application\/(vnd\.ms-excel|msexcel|x-msexcel|x-ms-excel|x-excel|x-dos_ms_excel|xls|x-xls)$'
 
 modelSpecs:
-  # A single spec: plain LiteRT-LM chat. MCP tool schemas are re-sent (and
-  # re-prefilled on the Pi's CPU, ~2 min per 4k tokens) on every model call,
-  # so tools are added per chat from the input bar rather than attached here.
-  # Leave the plain endpoint/model picker available next to this spec.
+  # Qwen on the workstation (the default) and plain LiteRT-LM chat on the
+  # Pi. MCP tool schemas are re-sent on every model call: ~1 s of prefill on
+  # the workstation's GPU, ~2 min per 4k tokens on the Pi's CPU, so only
+  # qwen-chat attaches tools. Leave the plain endpoint/model picker available
+  # next to these specs.
   prioritize: false
   list:
-    # Plain LiteRT-LM chat, picked for first-time users; after that new
-    # chats keep whatever was last chosen. No tool schemas, so the fastest
-    # replies; MCP servers can still be added per chat from the input bar.
+    # Picked for first-time users and after chats are cleared; after that
+    # new chats keep whatever was last chosen, or the default preset (in
+    # MongoDB: "Qwen 9B - Thinker", a copy of this spec). Wikipedia, web
+    # search and the calculator are on; the browser and sandbox are added
+    # from the input bar. While the workstation is down, Gemma on the Pi
+    # answers with the E2B - Thinker preset, these tools included.
+    - name: 'qwen-chat'
+      label: 'Qwen3.5 9B'
+      description: 'Qwen3.5-9B on the workstation GPU, with search and calculator. Gemma on the Pi answers while the workstation is off.'
+      softDefault: true
+      mcpServers:
+        - 'wikipedia'
+        - 'searxng'
+        - 'calc'
+      preset:
+        endpoint: 'Qwen'
+        model: 'qwen3.5-9b'
+        # The whole window (tokenConfig above). max_tokens is Qwen's
+        # recommended output length (model card), thinking included, so
+        # history gets up to 28672.
+        maxContextTokens: 61440
+        max_tokens: 32768
+        # Qwen's thinking-mode values; top_k and min_p are the endpoint's
+        # addParams. Thinking is on by default (the chat template), and
+        # llama-server returns it as reasoning_content, shown as "Thoughts".
+        temperature: 1.0
+        top_p: 0.95
+        presence_penalty: 1.5
+        # The router finds this prompt at the start of the system message
+        # ({{current_date}} matched as a wildcard) to swap in the Gemma
+        # preset's while the Pi answers; keep {{...}} variables to the ones
+        # LibreChat fills.
+        promptPrefix: |
+          You are Qwen3.5-9B, an open model from Alibaba's Qwen team, running locally on the user's workstation GPU. Today is {{current_date}}; your training data is older, so recent events are unknown to you.
+
+          Rules:
+          - Facts you are not certain of (names, dates, numbers, quotes, recent events, prices, URLs, APIs): search when you have search tools - Wikipedia (search it in English) for encyclopedic facts, web search for current events and everything else - and answer from the results. Check that a result names exactly what was asked; a similar name is a different person or thing. Without search tools, say how sure you are.
+          - Web search gives only short snippets: when none contains the answer, read the best result's page (web_url_read) before answering.
+          - Use the calculator tools for arithmetic, date differences and letter counts when you have them.
+          - When you use search results or a page you read, end with Sources: [Title](URL) for the ones you used.
+          - Make independent tool calls together. If a tool fails, say so. Never claim an action (searched, ran, created, deleted) that no tool result shows.
+          - No search for greetings, questions about yourself, or text the user gave you.
+          - Saved memories about the user are true; use them without searching. Remember/forget requests are handled for you: confirm in one sentence.
+          - If a message is unclear or may not be literal, ask one short question.
+          - Lead with the answer. Be concise unless asked for detail.
+    # Plain LiteRT-LM chat. No tool schemas, so the fastest replies on the
+    # Pi; MCP servers can still be added per chat from the input bar.
     - name: 'pi-chat'
       label: 'LiteRT-LM'
       description: 'Plain chat with the local model. Fastest; add tools from the input bar.'
-      softDefault: true
       preset:
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
