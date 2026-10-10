@@ -68,6 +68,8 @@ december monday tuesday wednesday thursday friday saturday sunday
 """.split())
 # A number next to a name is part of it: "2010 FIFA World Cup", "Apollo 11".
 NUMBER = re.compile(r"^\d[\d.,-]*$")
+# Titles of pages that list things rather than describe one.
+COLLECTION = re.compile(r"^(?:Lists? of|Outline of|Index of|Glossary of)\b|^Period \d+ element$")
 # Capitalised only because they open the query ("Describe Paris").
 OPENERS = set("""
 describe explain define summarise summarize list compare find search show
@@ -123,6 +125,14 @@ def forms(name: str) -> list[str]:
     out = [parts, parts[1:] if NUMBER.match(parts[0]) else parts, parts[:-1] if NUMBER.match(parts[-1]) else parts]
     out.append([t for t in parts if not NUMBER.match(t)])
     return list(dict.fromkeys(" ".join(p) for p in out if p))
+
+
+def _disambiguation(html: str) -> bool:
+    """A page that lists meanings ("Mercury most commonly refers to",
+    "Fe may refer to") rather than describing one thing. Only its opening
+    is checked: a long article may say "may refer to" further down."""
+    head = html[:3000].lower()
+    return any(s in head for s in ("may refer to", "may also refer to", "commonly refers to"))
 
 
 def page_url(base: str, path: str) -> str:
@@ -260,12 +270,21 @@ class Wiki:
     def passages(self, query: str, articles: int = 3, per_article: int = 60) -> list[Passage]:
         """Paragraphs of the top `articles` candidates, best first (BM25)."""
         out: list[Passage] = []
-        for rank, (path, title) in enumerate(self.candidates(query)[:articles]):
+        named = self._named(query)
+        rank = 0
+        for path, title in self.candidates(query):
+            if rank >= articles:
+                break
             html = bytes(self._resolve(path).get_item().content).decode("utf-8", "replace")
+            # Portals and disambiguation pages describe nothing themselves:
+            # "Portal:Solar System" crowded out the article for "largest
+            # planet". Kept when the query names one.
+            if path != named and (path.startswith("Portal:") or _disambiguation(html)):
+                continue
             paras = [(s.title, p) for s in sections(html) for p in s.paras][:per_article]
             out.extend(Passage(title, path, section, text, rank) for section, text in paras)
+            rank += 1
         ranked = bm25(query, out)
-        named = self._named(query)
         # The article the query names comes first with its opening paragraph
         # (the infobox, if any): "Rembrandt birth date" matches no word of
         # "Born: 15 July 1606". After an infobox, the first prose paragraph
@@ -307,8 +326,13 @@ def bm25(query: str, passages: list[Passage], k1: float = 1.2, b: float = 0.75) 
             if t in d:
                 idf = math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5))
                 score += idf * d[t] * (k1 + 1) / (d[t] + k1 * (1 - b + b * length / avgdl))
-        # Leads hold definitions and headline facts; prefer better articles.
-        p.score = score + 0.3 / (1 + p.article_rank) + (0.2 if not p.section else 0.0)
+        # Leads hold definitions and headline facts; prefer better articles,
+        # and an article about one thing over a list or outline that mentions
+        # it ("Gold" over "Period 6 element", "List of islands of ...").
+        p.score = (
+            score + 0.3 / (1 + p.article_rank) + (0.2 if not p.section else 0.0)
+            - (0.3 if COLLECTION.match(p.title) else 0.0)
+        )
     return sorted(passages, key=lambda p: -p.score)
 
 
@@ -356,6 +380,16 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
     for i, p in enumerate(shown, 1):
         where = p.title + (f" › {p.section}" if p.section else "")
         lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}")
+    if not wanted:
+        # The query names nothing, so no article was looked up by name: the
+        # model searched "atomic number of oxygen" three times, never got
+        # the Oxygen article, and said it didn't know. Hints in tool results
+        # are followed; ones in tool descriptions weren't.
+        lines.append(
+            "\nIf these passages don't answer it, search again with the name of"
+            " what you are asking about first, capitalised (\"Oxygen atomic"
+            " number\", not \"what is the atomic number of oxygen\")."
+        )
     articles = dict.fromkeys((p.path, p.title) for p in shown)
     links = ", ".join(f"[{title}]({page_url(link_base, path)})" for path, title in articles)
     lines.append(f"\nEnd your answer with this line:\nSources: {links}")
