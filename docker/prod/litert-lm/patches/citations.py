@@ -14,8 +14,8 @@ messages since the last user turn hold results from the search tools
    Wikipedia result, each Title/URL of a SearXNG result, and the URL of a
    page read (titled by its first heading);
 2. holds back any Sources block the model starts writing (a line like
-   "Sources:" or "**Sources**:" and the link lines after it) instead of
-   streaming it;
+   "Sources:" or "**Sources**:", or one of nothing but links, and the link
+   lines after it) instead of streaming it;
 3. ends the reply with one "Sources: [Title](URL), ..." line of the
    offered sources that back the answer. What backs it is the answer's
    own words, not the question's: every result shares the question's
@@ -77,6 +77,9 @@ _MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://(?:[^\s()]|\([^\s()]*\))+)\)")
 # A Sources block header: "Sources:", "**Sources:**", "### Sources", "Source:".
 _HEADER = re.compile(r"^[\s*_#>-]*sources?[\s*_]*(?::|\s*$)", re.IGNORECASE)
 _LEAD = re.compile(r"^[\s*_#>-]+")
+# A line of nothing but links: "[Cappella Sistina](URL), [Hendrick van den
+# Broeck](URL)" above the Sources line, citing a page about another chapel.
+_LINKS_ONLY = re.compile(r"^[\s*_>•-]*(?:\[[^\]\n]+\]\((?:[^\s()]|\([^\s()]*\))+\)[\s,;.*_|•-]*)+$")
 # The same header inside a line: "... is "Example Domain". Sources: [...](URL)".
 _INLINE = re.compile(r"(?<=\s)[*_]*Sources?[*_]*:")
 # What the end of a streamed piece may be the start of: "S", "Sour", "**Sources".
@@ -402,7 +405,7 @@ class Filter:
       else:
         self._partial += piece
         if self._partial.endswith("\n"):
-          if _HEADER.match(self._partial):
+          if _HEADER.match(self._partial) or _LINKS_ONLY.match(self._partial):
             self._block = [self._partial]
           else:
             out.append(self._continue(self._partial))
@@ -447,12 +450,13 @@ class Filter:
   @staticmethod
   def _maybe_header(partial: str) -> bool:
     word = _LEAD.sub("", partial).lower()
-    return "sources".startswith(word) or word.startswith("source")
+    # A line opening with a link may be a line of links: held to its end.
+    return "sources".startswith(word) or word.startswith("source") or word.startswith("[")
 
   def finish(self, has_tool_calls: bool) -> str:
     """Returns the rest of the reply, ending with the Sources line."""
     held, block = _CITE.sub("", self._hold + self._partial), self._block
-    if block is None and held and _HEADER.match(held):
+    if block is None and held and (_HEADER.match(held) or _LINKS_ONLY.match(held)):
       held, block = "", [held]
     if has_tool_calls:
       return self._emit([held, *(block or [])])
