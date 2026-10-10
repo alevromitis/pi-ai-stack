@@ -40,6 +40,9 @@ services:
       # line written from those results (patches/citations.py),
       # 0 = leave citing to the model.
       LITERT_CITATIONS: "${LITERT_CITATIONS:-1}"
+      # 1 = append the system prompt's "Before answering:" paragraph to every
+      # user message (patches/reminder.py), 0 = send messages as they are.
+      LITERT_REMINDER: "${LITERT_REMINDER:-1}"
     env_file:
       - .env.litert-lm
     volumes:
