@@ -420,6 +420,18 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
             f"Note: no passage below mentions {quoted}. Don't answer about it from"
             " passages about something else."
         )
+    # A query that names nothing in capitals ("crocodile vs alligator") gets
+    # no check above. When no article shown is titled with any of its words,
+    # say so: from "Caiman", the model answered with how caimans differ.
+    topic = [w for w in words(query) if len(w) >= 4 and not NUMBER.match(w)]
+    titles = fold(" ".join(dict.fromkeys(p.title for p in shown)))
+    if not wanted and topic and not any(f" {w} " in titles or f" {w}s " in titles or f" {w.rstrip('s')} " in titles for w in topic):
+        others = "; ".join(dict.fromkeys(p.title for p in shown))
+        lines.append(
+            f"Note: these passages are from articles about other things ({others}), not"
+            " about what the query asks. Don't answer from them unless they state it;"
+            " search again with the name of what you are asking about, capitalised."
+        )
     for i, p in enumerate(shown, 1):
         where = p.title + (f" › {p.section}" if p.section else "")
         lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}")
