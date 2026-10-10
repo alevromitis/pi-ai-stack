@@ -80,15 +80,15 @@ TOOLS = [
         "properties": {"expression": {"type": "string", "description": "e.g. (17*23)^2 or 15% of 80"}},
         "required": ["expression"],
     }),
-    (date_diff, "Days, weeks, months and years between two dates, with weekdays. For \"until <date>\" without a year, use its next occurrence from today.", {
+    (date_diff, "Days, weeks, months and years between two dates, with weekdays.", {
         "properties": {"start": DATE, "end": DATE},
         "required": ["start", "end"],
     }),
-    (date_add, "The date and weekday some days, weeks, months or years after a date (negative goes back; none: that date's weekday).", {
+    (date_add, "The date (and weekday) some days, weeks, months or years after a date; negative goes back.", {
         "properties": {"date": DATE, "days": INT, "weeks": INT, "months": INT, "years": INT},
         "required": ["date"],
     }),
-    (count_text, "Count characters, letters, words, vowels and consonants in a text, or how often a letter or string appears.", {
+    (count_text, "Count characters, letters and words in a text, or how often a letter or string appears.", {
         "properties": {"text": {"type": "string"}, "find": {"type": "string", "description": "letter or string to count"}},
         "required": ["text"],
     }),

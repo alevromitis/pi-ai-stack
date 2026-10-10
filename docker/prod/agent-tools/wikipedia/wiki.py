@@ -3,8 +3,7 @@
 Three steps, chosen by measurement (2026-10-09, 44 questions, see README
 "agent-tools"):
 
-  candidates  the article titled with the first name the query gives (or,
-              in a lowercase query, the words after a final "of"/"in"),
+  candidates  the article titled with the first name the query gives,
               then libzim's title suggestions (named things: "Eiffel
               Tower" beats "Eiffel Tower replicas"), then the ZIM's Xapian
               full-text index with every word, topped up with any word
@@ -67,17 +66,6 @@ NOT_NAMES = set("""
 january february march april may june july august september october november
 december monday tuesday wednesday thursday friday saturday sunday
 """.split())
-# Alone, a nationality or faith is an adjective, not a name: "the Greek god
-# of the sea" put the article "The Greek" first. ("Ancient Greek", "Roman
-# Empire" are still names.)
-DEMONYMS = set("""
-greek roman french english german italian spanish portuguese russian chinese
-japanese korean american british european african asian arab arabic indian
-egyptian turkish persian dutch swedish norwegian danish finnish polish irish
-scottish welsh canadian mexican brazilian australian christian muslim jewish
-catholic orthodox latin hebrew celtic norse byzantine ottoman soviet viking
-victorian hindu buddhist islamic biblical
-""".split())
 # Capitalised only because they open the query ("Describe Paris").
 OPENERS = set("""
 describe explain define summarise summarize list compare find search show
@@ -113,14 +101,9 @@ def names(query: str) -> list[str]:
             if run:
                 # A possessive ends a name: "Tolkien's books", not "Rubik's Cube".
                 run[-1] = re.sub(r"(?:'s|\u2019s)$", "", run[-1])
-                if not (len(run) == 1 and run[0].lower() in DEMONYMS):
-                    found.append(" ".join(run))
+                found.append(" ".join(run))
             run = []
     return [n for n in found if fold(n).strip()]
-
-
-# Lowercase queries name things at the end: "population of japan".
-TAIL = re.compile(r"\b(?:of|in)\s+(?:the\s+)?([a-z][a-z-]+(?:\s+[a-z][a-z-]+){0,2})\s*\??$")
 
 
 def page_url(base: str, path: str) -> str:
@@ -282,17 +265,6 @@ class Wiki:
             for candidate in ([f"The_{path}"] if the else []) + [path]:
                 try:
                     return self._resolve(candidate).path
-                except KeyError:
-                    continue
-        tail = TAIL.search(query) if not names(query) else None
-        if tail:
-            # "population of japan" -> Japan, "largest planet in the solar
-            # system" -> Solar_System (the passages on Japan's ageing
-            # gave its 2014 population).
-            entity = tail.group(1).strip()
-            for candidate in (entity.title(), entity[:1].upper() + entity[1:]):
-                try:
-                    return self._resolve(candidate.replace(" ", "_")).path
                 except KeyError:
                     continue
         return None
