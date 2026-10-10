@@ -11,11 +11,7 @@ tool, the server replies at once, without the engine, with a call to that
 tool, the question as its query. LibreChat runs it and sends the results
 back; the model then only has to read and answer (and may search again).
 An arithmetic question ("what is 17*23") becomes a `calculate` call the
-same way when the Calculator tools are on, and "what day of the week was
-20 July 1969?" a `date_add` call with no days added (its answer names the
-weekday), and "how old is someone born on 1 January 2000?" a `date_diff` call
-to today. Math in words ("square root of 7921", "12 times 7") is left to
-the model, which picks the calculator itself.
+same way when the Calculator tools are on.
 
 Which tool: wikipedia_search, or searxng_web_search for questions about now
 ("latest", "current", "today", prices, weather) or when Wikipedia is off.
@@ -75,11 +71,7 @@ _ALWAYS_PERSONAL = re.compile(
     r"\b(?:(?i:you|your|yours|yourself|i'm|i've|me|my|mine|myself|we|our|ours)|i|us)\b"
     r"|(?:^|\b[a-z]+\W+)I\b|\bI\s+(?!of\b)[a-z]"
 )
-# Point back into the chat; only fine in its first message, and there only
-# next to a name ("How tall is the Eiffel Tower and when was it built?", not
-# "How long is it?"). Later in a chat a question must name its subject
-# itself: "What's the best time to visit?" after "Tell me about Santorini"
-# searched for "best time to visit".
+# Point back into the chat; only fine in its first message.
 _REFERS_BACK = re.compile(
     r"\b(?:he|she|it|they|him|her|his|hers|its|their|theirs|them"
     r"|this|that|these|those|there|above|previous|earlier)\b",
@@ -90,13 +82,9 @@ _NOT_LOOKUP = re.compile(
     r"|how should|write|rewrite|translate|summari[sz]e|explain|compare|difference"
     r"|meaning of life|joke|poem|story|code|function|script|regex|bug|error"
     r"|what (?:time|day|date)|percent"
-    # Calculator questions: dates, counting letters, math in words.
+    # Calculator questions: dates, counting letters.
     r"|(?:days|weeks|months|years) (?:until|till|since|between|ago|from|after|before)"
-    r"|letters?|vowels?|consonants?|syllables?|characters?|words? (?:are )?in|sentence"
-    r"|the word|spell|[a-z]'s"
-    r"|square root|cube root|sqrt|squared|cubed|to the power|factorial"
-    r"|logarithm|log of|divided by|multiplied by|modulo"
-    r"|\d+(?:\.\d+)?\s*(?:plus|minus|times|over)\s*\d)\b|%",
+    r"|letters?|syllables?|characters?|the word|spell|[a-z]'s)\b|%",
     re.IGNORECASE,
 )
 _RECENT = re.compile(
@@ -107,40 +95,13 @@ _RECENT = re.compile(
 )
 # Comparing numbers is for the calculator or the model: "9.11 or 9.9?".
 _NUMBERS = re.compile(r"\d.*\b(?:or|than|vs|versus)\b.*\d", re.IGNORECASE)
-# Links and code: "print(sum(range(10)))", "x == 1", "import os".
-_SKIP = re.compile(
-    r"https?://|www\.|```|`|[\w.]+\([^)]*\)|==|!=|:=|\bdef |\bimport |;\s*$|[{}]"
-)
+_SKIP = re.compile(r"https?://|www\.|```|`")
 _ARITHMETIC = re.compile(r"^[\d\s.,+\-*/x×÷^%()]+$")
 _OPERATOR = re.compile(r"\d\s*[+\-*/x×÷^%]\s*\(?\s*\d")
 _MATH_PREFIX = re.compile(
     r"^(?:what(?:'s| is)|calculate|compute|how much is|solve|evaluate)\b\s*",
     re.IGNORECASE,
 )
-# "What day of the week was 20 July 1969?". Only dates date_add reads:
-# YYYY-MM-DD or a day, month name and year ("Christmas 2026" is not one).
-_MONTH = (
-    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
-)
-_DATE = (
-    r"(?P<date>\d{4}-\d{1,2}-\d{1,2}"
-    rf"|\d{{1,2}}(?:st|nd|rd|th)? (?:of )?{_MONTH},? \d{{1,4}}"
-    rf"|{_MONTH} \d{{1,2}}(?:st|nd|rd|th)?,? \d{{1,4}})"
-)
-_WEEKDAY = re.compile(
-    r"^(?:what|which) (?:day of the week|day|weekday)"
-    rf" (?:was|is|will be|did|does|will)\s+(?:the\s+)?{_DATE}"
-    r"(?:\s+(?:fall on|fall|land on|be))?\s*\??$",
-    re.IGNORECASE,
-)
-# "How old is someone born on 1 January 2000?" -> date_diff from then to today.
-_AGE = re.compile(
-    r"^how old (?:is|was|will|would)(?: be)? (?:someone|somebody|a person|one|a child)?"
-    rf"\s*(?:who was\s+)?born (?:on\s+)?(?:the\s+)?{_DATE}(?:\s+be)?(?:\s+today|\s+now)?\s*\??$",
-    re.IGNORECASE,
-)
-# A capitalised word after the first: "the Eiffel Tower", "World War I".
-_NAME = re.compile(r"(?<=\S)\s+[A-ZÀ-Þ]")
 _LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
 _LETTER = re.compile(r"[^\W\d_]")
 
@@ -208,20 +169,6 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
     calc = _tool(body, "calculate", "expression")
     return (calc, {"expression": math}, "arithmetic") if calc else None
 
-  age = _AGE.match(text)
-  if age:
-    diff = _tool(body, "date_diff", "start")
-    if diff:
-      date = re.sub(r"(?<=\d) of ", " ", age.group("date"))
-      return diff, {"start": date.strip(" ,."), "end": "today"}, "age"
-
-  weekday = _WEEKDAY.match(text)
-  if weekday:
-    add = _tool(body, "date_add", "date")
-    if add:
-      date = re.sub(r"(?<=\d) of ", " ", weekday.group("date"))
-      return add, {"date": date.strip(" ,.")}, "weekday"
-
   later = any(
       isinstance(m, dict) and m.get("role") == "assistant" for m in messages[:-1]
   )
@@ -231,9 +178,7 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
     return None
   if _OPERATOR.search(text) or _NUMBERS.search(text):
     return None
-  if later and not _NAME.search(text):
-    return None
-  if _REFERS_BACK.search(text) and (later or not _NAME.search(text)):
+  if later and _REFERS_BACK.search(text):
     return None
   query = text.rstrip(" ?.!")
   if len(query) < 3:
