@@ -159,15 +159,31 @@ def english(text: str) -> bool:
   return foreign < 2 or foreign <= sum(w in _ENGLISH for w in words)
 
 
+def _copied(query: str, asked: str) -> bool:
+  """Whether a query copies the words of a message not in English: "Estados
+  do Brasil" for "Quantos estados tem o Brasil?". Only words the message
+  writes in lowercase count, so a name searched in English ("Real Madrid
+  founded") passes."""
+  if english(asked):
+    return False
+  common = {w for w in re.findall(r"\b[^\W\d_]{4,}\b", asked) if w.islower()}
+  terms = [w.lower() for w in _LETTERS.findall(query) if len(w) >= 3]
+  shared = sum(w in common for w in terms)
+  return shared >= 2 or shared == 1 and len(terms) <= 2
+
+
 def english_only(body: dict[str, Any]) -> None:
   """Replaces, in place, the results of searches whose query isn't English."""
   messages = body.get("messages")
   if not _ENGLISH_ONLY or not isinstance(messages, list):
     return
   foreign: set[Any] = set()
+  asked = ""
   for msg in messages:
     if not isinstance(msg, dict):
       continue
+    if msg.get("role") == "user":
+      asked = _text(msg.get("content"))
     for call in msg.get("tool_calls") or []:
       fn = (call.get("function") or {}) if isinstance(call, dict) else {}
       if not str(fn.get("name") or "").startswith(_SEARCHES):
@@ -177,7 +193,7 @@ def english_only(body: dict[str, Any]) -> None:
       except (TypeError, ValueError):
         continue
       query = str(args.get("query") or "") if isinstance(args, dict) else ""
-      if query and not english(query):
+      if query and (not english(query) or _copied(query, asked)):
         foreign.add(call.get("id"))
     if msg.get("role") == "tool" and msg.get("tool_call_id") in foreign and msg.get("content") != _NOT_ENGLISH:
       msg["content"] = _NOT_ENGLISH
