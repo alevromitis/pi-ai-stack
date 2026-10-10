@@ -24,10 +24,12 @@ messages since the last user turn hold results from the search tools
    or long numbers that the question and queries don't (capitalised
    words, numbers of 3+ digits or with a decimal point), or 30% (at least
    two) of its other new words; among those, the ones scoring at least
-   half the best. Sources the model linked in its text always count, ones it
-   listed in its Sources block if they hold any new word. Links the
-   model made up never reach the line, and with nothing backing the
-   answer ("I don't know", or an answer from memory) there is no line.
+   half the best (a source the model linked in its text needs only to
+   back it). What the model listed in its own Sources block counts for
+   nothing: it listed "Eiffel Tower (Paris, Tennessee)" for the Paris
+   tower's height. Links the model made up never reach the line, and with
+   nothing backing the answer ("I don't know", or an answer from memory)
+   there is no line.
    Listing every result, as before, cited "The Greek" and "The God
    Beneath the Sea" for Poseidon.
 
@@ -201,9 +203,10 @@ def collect(body: dict[str, Any]) -> Offered | None:
   return groups
 
 
-def _line(groups: list[list[Source]], prose: str, listed: str, asked: str) -> str:
+def _line(groups: list[list[Source]], prose: str, asked: str) -> str:
   """The Sources line for the offered sources that back the answer, or ""."""
-  answer = "\n".join(l for l in prose.splitlines() if not _URL.search(l))
+  # Link text stays, URLs go: "as [War and Peace](...) says".
+  answer = _URL.sub(" ", _MD_LINK.sub(r"\1", prose))
   asked_tokens = {t.lower() for t in _WORD.findall(asked)}
   new = _words(answer) - _words(asked)
   strong = {
@@ -222,14 +225,12 @@ def _line(groups: list[list[Source]], prose: str, listed: str, asked: str) -> st
       tokens = {t.lower().replace(",", "") for t in _WORD.findall(text)}
       hits, other = len(strong & tokens), len((new - strong) & words)
       score[u] = 2 * hits + other if hits or other >= need else 0
-      if u in listed and hits + other:
-        score[u] = max(score[u], 1)
   best = max(score.values(), default=0)
   used: dict[str, str] = {}
   for g in groups:
     for t, u, _ in g:
       # Substring, not a URL regex: Wikipedia paths hold parentheses.
-      if u in prose or (score[u] and (score[u] * 2 >= best or u in listed)):
+      if score[u] and (score[u] * 2 >= best or u in prose):
         used.setdefault(u, t)
   if not used:
     return ""
@@ -309,7 +310,7 @@ class Filter:
       return text
     listed = "".join(block or [])
     prose = self._seen.replace(listed, "") if listed else self._seen
-    line = _line(self._sources, prose, listed, self._asked)
+    line = _line(self._sources, prose, self._asked)
     _log(f"{sum(map(len, self._sources))} offered; {line[:160] or 'none backs the answer'}")
     if not line:
       return text
