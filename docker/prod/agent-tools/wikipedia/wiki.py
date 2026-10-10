@@ -66,6 +66,17 @@ NOT_NAMES = set("""
 january february march april may june july august september october november
 december monday tuesday wednesday thursday friday saturday sunday
 """.split())
+# Alone, a nationality or faith is an adjective, not a name: "the Greek god
+# of the sea" put the article "The Greek" first. ("Ancient Greek", "Roman
+# Empire" are still names.)
+DEMONYMS = set("""
+greek roman french english german italian spanish portuguese russian chinese
+japanese korean american british european african asian arab arabic indian
+egyptian turkish persian dutch swedish norwegian danish finnish polish irish
+scottish welsh canadian mexican brazilian australian christian muslim jewish
+catholic orthodox latin hebrew celtic norse byzantine ottoman soviet viking
+victorian hindu buddhist islamic biblical
+""".split())
 # Capitalised only because they open the query ("Describe Paris").
 OPENERS = set("""
 describe explain define summarise summarize list compare find search show
@@ -101,7 +112,8 @@ def names(query: str) -> list[str]:
             if run:
                 # A possessive ends a name: "Tolkien's books", not "Rubik's Cube".
                 run[-1] = re.sub(r"(?:'s|\u2019s)$", "", run[-1])
-                found.append(" ".join(run))
+                if not (len(run) == 1 and run[0].lower() in DEMONYMS):
+                    found.append(" ".join(run))
             run = []
     return [n for n in found if fold(n).strip()]
 
