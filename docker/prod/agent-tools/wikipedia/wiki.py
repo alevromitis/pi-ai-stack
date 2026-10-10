@@ -336,9 +336,35 @@ def bm25(query: str, passages: list[Passage], k1: float = 1.2, b: float = 0.75) 
     return sorted(passages, key=lambda p: -p.score)
 
 
-def trim(text: str, limit: int) -> str:
+SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[\"'(\[]?[A-Z0-9])")
+
+
+def trim(text: str, limit: int, query: str = "") -> str:
+    """The passage within `limit` characters: its start, or the run of
+    sentences holding more of the query's words. "...water boil at the top
+    of everest" got the Boiling point paragraph cut before its sentence on
+    Mount Everest (71 °C), and the model answered with 93.4 °C at 1,905 m."""
     if len(text) <= limit:
         return text
+    sentences = SENTENCE.split(text)
+    terms = list(dict.fromkeys(words(query)))
+    if len(sentences) > 1 and terms:
+        folded = [fold(x) for x in sentences]
+
+        def covered(i: int, j: int) -> int:
+            window = "".join(folded[i:j])
+            return sum(1 + (len(t) >= 5) for t in terms if f" {fold(t).strip()}" in window)
+
+        best, start, end = -1, 0, 0
+        for i in range(len(sentences)):
+            j, size = i, 0
+            while j < len(sentences) and size + len(sentences[j]) + 1 <= limit:
+                size += len(sentences[j]) + 1
+                j += 1
+            if j > i and covered(i, j) > best:
+                best, start, end = covered(i, j), i, j
+        if start > 0:
+            return "… " + " ".join(sentences[start:end]) + (" …" if end < len(sentences) else "")
     cut = text[:limit]
     stop = cut.rfind(". ")
     return (cut[: stop + 1] if stop > limit * 0.6 else cut.rstrip()) + " …"
@@ -406,6 +432,13 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
     seen = fold(" ".join(f"{p.title} {p.text}" for p in shown))
     wanted = names(query)
     missing = [n for n in wanted if not any(fold(f) in seen for f in forms(n))]
+    if not wanted:
+        # Lowercase, names look like any word: "...boil at the top of
+        # everest" got "Boiling point" passages, and the model answered with
+        # the boiling point at 1,905 m. Longer words no passage holds (as a
+        # word or its start: "boil" in "boiling") are named the same way.
+        missing = [w for w in dict.fromkeys(words(query)) if len(w) >= 5 and not NUMBER.match(w) and f" {fold(w).strip()}" not in seen]
+        missing = [w for w in missing if w not in ("whats", "hows", "wheres", "whos")]
     quoted = " or ".join(f'"{m}"' for m in missing)
     if missing and len(missing) == len(wanted):
         others = "; ".join(dict.fromkeys(p.title for p in shown))
@@ -425,7 +458,7 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
     # say so: from "Caiman", the model answered with how caimans differ.
     topic = [w for w in words(query) if len(w) >= 4 and not NUMBER.match(w)]
     titles = fold(" ".join(dict.fromkeys(p.title for p in shown)))
-    if not wanted and topic and not any(f" {w} " in titles or f" {w}s " in titles or f" {w.rstrip('s')} " in titles for w in topic):
+    if not wanted and topic and not any(f" {w.rstrip('s')}" in titles for w in topic):
         others = "; ".join(dict.fromkeys(p.title for p in shown))
         lines.append(
             f"Note: these passages are from articles about other things ({others}), not"
@@ -434,7 +467,7 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
         )
     for i, p in enumerate(shown, 1):
         where = p.title + (f" › {p.section}" if p.section else "")
-        lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}")
+        lines.append(f"\n[{i}] {where}\n{trim(p.text, chars, query)}")
     if not wanted:
         # The query names nothing, so no article was looked up by name: the
         # model searched "atomic number of oxygen" three times, never got
