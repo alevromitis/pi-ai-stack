@@ -8,7 +8,9 @@ prompt, tool schemas and the whole history are prefilled again on every
 turn - and on every tool round of an agent turn. Here the last Conversation
 stays alive. When a request's messages are that conversation's history plus
 the reply it generated, followed only by new user/tool messages, just those
-new messages are sent and only they are prefilled.
+new messages are sent and only they are prefilled. That includes a new user
+message followed by a tool-call turn the server answered without the
+engine (presearch.py) and its tool results.
 
 Anything else (edited or regenerated messages, other chats, title requests,
 changed tools or sampler settings) is a miss: the cached conversation is
@@ -202,6 +204,8 @@ def _match(
     )
     _log(f"miss: history differs at message {diverge} (cached {n})")
     return None
+  if _presearched(messages[n:]):
+    return n
   new_roles = {m.get("role") for m in messages[n:]}
   if not new_roles <= set(_REUSABLE_ROLES) or (
       "user" in new_roles and len(messages) - n > 1
@@ -209,6 +213,19 @@ def _match(
     _log(f"miss: new messages have roles {sorted(new_roles)}")
     return None
   return n
+
+
+def _presearched(new: list[Any]) -> bool:
+  """user, a tool-call-only assistant turn, then its tool results."""
+  return (
+      len(new) >= 3
+      and all(isinstance(m, dict) for m in new)
+      and new[0].get("role") == "user"
+      and new[1].get("role") == "assistant"
+      and bool(new[1].get("tool_calls"))
+      and not _canonical_content(new[1].get("content"))
+      and all(m.get("role") == "tool" for m in new[2:])
+  )
 
 
 @contextlib.contextmanager

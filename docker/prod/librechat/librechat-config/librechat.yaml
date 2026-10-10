@@ -82,7 +82,8 @@ mcpServers:
     timeout: 30000
   # Exact arithmetic, date differences and letter counts (agent-tools, no
   # network, no files): calculate, date_diff, date_add, count_text. The
-  # model miscounts even when thinking step by step.
+  # model miscounts even when thinking step by step. LiteRT-LM's presearch
+  # patch calls `calculate` itself for a bare sum ("what is 17*23").
   calc:
     type: streamable-http
     url: 'http://mcp-calc-1:8000/mcp'
@@ -258,8 +259,11 @@ modelSpecs:
         # rewritten by litert-lm (patches/citations.py) from the tool
         # results, so the prompt only asks the model to link what it used,
         # which picks the subset the line lists. Results that don't answer
-        # it trigger another search before "I don't know". Short (~420
-        # tokens, prefilled once per chat, then reused by the prefix cache). The E2B - Thinker / E2B - Fast presets
+        # it trigger another search before "I don't know". A plain factual
+        # question doesn't depend on the model choosing to search: litert-lm
+        # (patches/presearch.py) answers it with the search call itself.
+        # Short (~430 tokens, prefilled once per chat, then reused by the
+        # prefix cache). The E2B - Thinker / E2B - Fast presets
         # (in MongoDB, not here) carry a copy of this prompt. {{current_date}} changes once a day, so it doesn't break
         # the cache.
         promptPrefix: |
