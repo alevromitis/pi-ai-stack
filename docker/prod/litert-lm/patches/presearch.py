@@ -13,7 +13,8 @@ back; the model then only has to read and answer (and may search again).
 An arithmetic question ("what is 17*23") becomes a `calculate` call the
 same way when the Calculator tools are on, and "what day of the week was
 20 July 1969?" a `date_add` call with no days added (its answer names the
-weekday). Math in words ("square root of 7921", "12 times 7") is left to
+weekday), and "how old is someone born on 1 January 2000?" a `date_diff` call
+to today. Math in words ("square root of 7921", "12 times 7") is left to
 the model, which picks the calculator itself.
 
 Which tool: wikipedia_search, or searxng_web_search for questions about now
@@ -91,7 +92,8 @@ _NOT_LOOKUP = re.compile(
     r"|what (?:time|day|date)|percent"
     # Calculator questions: dates, counting letters, math in words.
     r"|(?:days|weeks|months|years) (?:until|till|since|between|ago|from|after|before)"
-    r"|letters?|syllables?|characters?|words? (?:are )?in|sentence|the word|spell|[a-z]'s"
+    r"|letters?|vowels?|consonants?|syllables?|characters?|words? (?:are )?in|sentence"
+    r"|the word|spell|[a-z]'s"
     r"|square root|cube root|sqrt|squared|cubed|to the power|factorial"
     r"|logarithm|log of|divided by|multiplied by|modulo"
     r"|\d+(?:\.\d+)?\s*(?:plus|minus|times|over)\s*\d)\b|%",
@@ -120,13 +122,21 @@ _MATH_PREFIX = re.compile(
 _MONTH = (
     r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
 )
-_WEEKDAY = re.compile(
-    r"^(?:what|which) (?:day of the week|day|weekday)"
-    r" (?:was|is|will be|did|does|will)\s+(?:the\s+)?(?P<date>"
-    r"\d{4}-\d{1,2}-\d{1,2}"
+_DATE = (
+    r"(?P<date>\d{4}-\d{1,2}-\d{1,2}"
     rf"|\d{{1,2}}(?:st|nd|rd|th)? (?:of )?{_MONTH},? \d{{1,4}}"
     rf"|{_MONTH} \d{{1,2}}(?:st|nd|rd|th)?,? \d{{1,4}})"
+)
+_WEEKDAY = re.compile(
+    r"^(?:what|which) (?:day of the week|day|weekday)"
+    rf" (?:was|is|will be|did|does|will)\s+(?:the\s+)?{_DATE}"
     r"(?:\s+(?:fall on|fall|land on|be))?\s*\??$",
+    re.IGNORECASE,
+)
+# "How old is someone born on 1 January 2000?" -> date_diff from then to today.
+_AGE = re.compile(
+    r"^how old (?:is|was|will|would)(?: be)? (?:someone|somebody|a person|one|a child)?"
+    rf"\s*(?:who was\s+)?born (?:on\s+)?(?:the\s+)?{_DATE}(?:\s+be)?(?:\s+today|\s+now)?\s*\??$",
     re.IGNORECASE,
 )
 # A capitalised word after the first: "the Eiffel Tower", "World War I".
@@ -197,6 +207,13 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
   if _ARITHMETIC.match(math) and _OPERATOR.search(math):
     calc = _tool(body, "calculate", "expression")
     return (calc, {"expression": math}, "arithmetic") if calc else None
+
+  age = _AGE.match(text)
+  if age:
+    diff = _tool(body, "date_diff", "start")
+    if diff:
+      date = re.sub(r"(?<=\d) of ", " ", age.group("date"))
+      return diff, {"start": date.strip(" ,."), "end": "today"}, "age"
 
   weekday = _WEEKDAY.match(text)
   if weekday:
