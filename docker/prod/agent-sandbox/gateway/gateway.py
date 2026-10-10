@@ -107,10 +107,11 @@ def human(size: float) -> str:
 
 
 # Asked for its RAM or CPUs, the model reported the host's from `free` and
-# `lscpu`; the limits come with the first result instead.
+# `lscpu`; the limits come with the first result instead (the image's free
+# and nproc now report them too).
 NEW_NOTE = (
     f"[New sandbox: Debian 13, root, cwd /work. Limits: {CPUS:g} CPU, {human(MEMORY)} RAM"
-    f" + {human(MEMORY_SWAP - MEMORY)} swap, {human(DISK_LIMIT)} disk (free and nproc show the host's).]"
+    f" + {human(MEMORY_SWAP - MEMORY)} swap, {human(DISK_LIMIT)} disk (df, lscpu and top show the host's).]"
 )
 
 
