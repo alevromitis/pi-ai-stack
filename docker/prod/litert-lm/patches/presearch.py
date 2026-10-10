@@ -30,6 +30,11 @@ text.
 The prefix cache (prefix_cache.py) accepts the server's tool-call turn, so
 the follow-up request still prefills only the new messages.
 
+Searches are in English (user, 2026-10-10), so a message in another
+language isn't pre-searched with its own words: the model searches in
+English itself (citations.english; citations.english_only replaces the
+results of searches it writes in another language).
+
 Env:
   LITERT_PRESEARCH=0   disable (every request reaches the model)
 """
@@ -44,6 +49,7 @@ from typing import Any
 
 import click
 
+from litert_lm_cli.commands.serve import citations
 from litert_lm_cli.commands.serve import openai_common
 
 _ENABLED = os.environ.get("LITERT_PRESEARCH", "1") != "0"
@@ -167,7 +173,7 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
   if not raw or "\n" in raw or len(raw) > _MAX_CHARS or _SKIP.search(raw):
     return None
   letters = _LETTER.findall(raw)
-  if letters and len(_LATIN.findall(raw)) < 0.8 * len(letters):
+  if letters and len(_LATIN.findall(raw)) < 0.8 * len(letters) or not citations.english(raw):
     return None
   text, asked = _strip(raw)
 
