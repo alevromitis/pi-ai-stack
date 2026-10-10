@@ -74,7 +74,11 @@ _ALWAYS_PERSONAL = re.compile(
     r"\b(?:(?i:you|your|yours|yourself|i'm|i've|me|my|mine|myself|we|our|ours)|i|us)\b"
     r"|(?:^|\b[a-z]+\W+)I\b|\bI\s+(?!of\b)[a-z]"
 )
-# Point back into the chat; only fine in its first message.
+# Point back into the chat; only fine in its first message, and there only
+# next to a name ("How tall is the Eiffel Tower and when was it built?", not
+# "How long is it?"). Later in a chat a question must name its subject
+# itself: "What's the best time to visit?" after "Tell me about Santorini"
+# searched for "best time to visit".
 _REFERS_BACK = re.compile(
     r"\b(?:he|she|it|they|him|her|his|hers|its|their|theirs|them"
     r"|this|that|these|those|there|above|previous|earlier)\b",
@@ -87,7 +91,7 @@ _NOT_LOOKUP = re.compile(
     r"|what (?:time|day|date)|percent"
     # Calculator questions: dates, counting letters, math in words.
     r"|(?:days|weeks|months|years) (?:until|till|since|between|ago|from|after|before)"
-    r"|letters?|syllables?|characters?|the word|spell|[a-z]'s"
+    r"|letters?|syllables?|characters?|words? (?:are )?in|sentence|the word|spell|[a-z]'s"
     r"|square root|cube root|sqrt|squared|cubed|to the power|factorial"
     r"|logarithm|log of|divided by|multiplied by|modulo"
     r"|\d+(?:\.\d+)?\s*(?:plus|minus|times|over)\s*\d)\b|%",
@@ -122,6 +126,8 @@ _WEEKDAY = re.compile(
     r"(?:\s+(?:fall on|fall|land on|be))?\s*\??$",
     re.IGNORECASE,
 )
+# A capitalised word after the first: "the Eiffel Tower", "World War I".
+_NAME = re.compile(r"(?<=\S)\s+[A-ZÀ-Þ]")
 _LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
 _LETTER = re.compile(r"[^\W\d_]")
 
@@ -205,7 +211,9 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
     return None
   if _OPERATOR.search(text) or _NUMBERS.search(text):
     return None
-  if later and _REFERS_BACK.search(text):
+  if later and not _NAME.search(text):
+    return None
+  if _REFERS_BACK.search(text) and (later or not _NAME.search(text)):
     return None
   query = text.rstrip(" ?.!")
   if len(query) < 3:
