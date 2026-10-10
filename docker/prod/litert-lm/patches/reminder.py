@@ -18,6 +18,13 @@ compares whole histories) still matches.
 
 Runs after citations.collect and presearch, which read the user's own words.
 
+When the request offers the agent-sandbox tools (LibreChat names them
+"..._mcp_sandbox"), the copy ends with one sentence for them: asked to "set
+up a cron job ... make sure it actually runs" or to change the timezone, the
+model wrote steps or said it couldn't change "the system I am running on",
+with the sandbox one call away; a line saying so in the run tool's own
+description didn't change that.
+
 Env:
   LITERT_REMINDER=0   disable (messages pass through untouched)
 """
@@ -53,6 +60,20 @@ def _note(messages: list[Any]) -> str:
   return ""
 
 
+_SANDBOX = (
+    "With the sandbox: do system tasks in it yourself and show the output,"
+    " and run code there before giving it."
+)
+
+
+def _offers_sandbox(body: dict[str, Any]) -> bool:
+  return any(
+      "_mcp_sandbox" in str(((tool or {}).get("function") or {}).get("name") or "")
+      for tool in body.get("tools") or []
+      if isinstance(tool, dict)
+  )
+
+
 def apply(body: dict[str, Any]) -> None:
   """Appends the note, in place, to each user message that lacks it."""
   messages = body.get("messages")
@@ -61,6 +82,8 @@ def apply(body: dict[str, Any]) -> None:
   note = _note(messages)
   if not note:
     return
+  if _offers_sandbox(body):
+    note = f"{note[:-1]} {_SANDBOX})"
   for msg in messages:
     if not isinstance(msg, dict) or msg.get("role") != "user":
       continue
