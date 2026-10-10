@@ -1,4 +1,4 @@
-"""Exact answers for what gemma4-e2b gets wrong: arithmetic, dates, counting letters.
+"""Exact answers for what gemma4-e2b gets wrong: arithmetic, clock times, dates, counting letters.
 
 Pure functions, no I/O; server.py exposes them as MCP tools. Each returns a
 one-line answer that restates its input, so the model can't misattribute it.
@@ -96,9 +96,52 @@ def _format(value: int | float | complex) -> str:
     raise CalcError("not a real number")
 
 
+# Clock times and durations, in minutes: "06:40 - 2:00 - 0:45", "06:40 - 2h - 45min".
+# Asked when to leave home for a 06:40 flight (2 h early, 45 min drive), the
+# model worked it out in its head as 04:40 + 45 min = 05:25.
+_CLOCK = re.compile(r"\b(\d{1,2}):([0-5]\d)(?::([0-5]\d))?\b")
+_H_M = re.compile(r"(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\s*(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)(?![a-z])", re.IGNORECASE)
+_HOURS = re.compile(r"(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)(?![a-z])", re.IGNORECASE)
+_MINUTES = re.compile(r"(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)(?![a-z])", re.IGNORECASE)
+_BARE = re.compile(r"[+-]\s*\d+(?:\.\d+)?(?!\s*[*/(\d.])")
+
+
+def _in_minutes(text: str) -> tuple[str, bool, bool]:
+    """The text with clock times and h/min durations as minutes; whether it
+    held a clock time, and whether it held either."""
+    clock = bool(_CLOCK.search(text))
+    out = _CLOCK.sub(lambda m: f"({int(m[1])}*60+{int(m[2])}" + (f"+{int(m[3])}/60)" if m[3] else ")"), text)
+    out = _H_M.sub(lambda m: f"({m[1]}*60+{m[2]})", out)
+    out = _HOURS.sub(lambda m: f"({m[1]}*60)", out)
+    out = _MINUTES.sub(lambda m: f"({m[1]})", out)
+    if out != text:
+        # "06:40 - 2": hours or minutes? Only units say.
+        masked = _MINUTES.sub("T", _HOURS.sub("T", _H_M.sub("T", _CLOCK.sub("T", text))))
+        if _BARE.search(masked):
+            raise CalcError("add or subtract times as H:MM or with units (2h, 45min), not bare numbers")
+    return out, clock, out != text
+
+
+def _hm(minutes: float, clock: bool) -> str:
+    """Minutes as a clock time ('03:55', with the day it falls on) or a duration ('2:15 (2 h 15 min)')."""
+    seconds = round(minutes * 60)
+    if clock:
+        days, rest = divmod(seconds, 86400)
+        h, rest = divmod(rest, 3600)
+        text = f"{h:02d}:{rest // 60:02d}" + (f":{rest % 60:02d}" if rest % 60 else "")
+        if days:
+            text += {1: " the next day", -1: " the day before"}.get(days, f" ({days:+d} days)")
+        return text
+    sign, seconds = ("-" if seconds < 0 else ""), abs(seconds)
+    h, rest = divmod(seconds, 3600)
+    text = f"{sign}{h}:{rest // 60:02d}" + (f":{rest % 60:02d}" if rest % 60 else "")
+    words = " ".join(part for part in (f"{h} h" if h else "", f"{rest // 60} min" if rest // 60 or not h else "") if part)
+    return f"{text} ({sign}{words})"
+
+
 def calculate(expression: str) -> str:
-    """'17*23 = 391'. Raises CalcError for anything but arithmetic."""
-    text = _prepare(expression)
+    """'17*23 = 391', '06:40 - 2h - 45min = 03:55'. Raises CalcError for anything but arithmetic."""
+    text, clock, timed = _in_minutes(_prepare(expression))
     if not text:
         raise CalcError("empty expression")
     try:
@@ -113,6 +156,10 @@ def calculate(expression: str) -> str:
         raise CalcError("division by zero") from exc
     except (OverflowError, ValueError, TypeError) as exc:
         raise CalcError(str(exc) or type(exc).__name__) from exc
+    if timed:
+        if isinstance(value, complex):
+            raise CalcError("not a real number")
+        return f"{expression.strip().rstrip('=?').strip()} = {_hm(value, clock)}"
     return f"{expression.strip().rstrip('=?').strip()} = {_format(value)}"
 
 
