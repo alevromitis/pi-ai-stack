@@ -105,7 +105,10 @@ _RECENT = re.compile(
 )
 # Comparing numbers is for the calculator or the model: "9.11 or 9.9?".
 _NUMBERS = re.compile(r"\d.*\b(?:or|than|vs|versus)\b.*\d", re.IGNORECASE)
-_SKIP = re.compile(r"https?://|www\.|```|`")
+# Links and code: "print(sum(range(10)))", "x == 1", "import os".
+_SKIP = re.compile(
+    r"https?://|www\.|```|`|[\w.]+\([^)]*\)|==|!=|:=|\bdef |\bimport |;\s*$|[{}]"
+)
 _ARITHMETIC = re.compile(r"^[\d\s.,+\-*/x×÷^%()]+$")
 _OPERATOR = re.compile(r"\d\s*[+\-*/x×÷^%]\s*\(?\s*\d")
 _MATH_PREFIX = re.compile(
