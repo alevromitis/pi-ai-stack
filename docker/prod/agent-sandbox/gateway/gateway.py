@@ -402,6 +402,27 @@ _APT_SEARCH = (
 )
 
 
+# Asked how much disk it had, gemma4-e2b ran df and reported the host's 39 GB
+# free, with the limits stated in its first result long gone from view: it
+# follows the newest result, so these commands' results restate them.
+_HOST_VIEW = re.compile(r"\b(?:df|free|nproc|lscpu|vmstat|top|htop|duf)\b")
+
+
+async def limits_note(box: Sandbox, command: str) -> str:
+    """The sandbox's limits, after a command that shows the host's instead."""
+    if not _HOST_VIEW.search(command):
+        return ""
+    try:
+        written = (await box.container.show(size="1")).get("SizeRw") or 0
+    except aiodocker.DockerError:
+        written = None
+    disk = f"{human(DISK_LIMIT)} disk" + (f", {human(written)} written so far" if written is not None else "")
+    return (
+        f"[These figures are the host's. This sandbox's own limits: {CPUS:g} CPU, {human(MEMORY)} RAM"
+        f" + {human(MEMORY_SWAP - MEMORY)} swap, {disk}.]"
+    )
+
+
 async def apt_alternatives(box: Sandbox, output: str) -> str:
     """For each package apt couldn't find, the ones it has like it."""
     notes = []
@@ -488,7 +509,7 @@ def tool(destructive: bool = False) -> Callable:
 
 @tool()
 async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str:
-    """Run a bash command in this chat's own Debian 13 sandbox. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
+    """Run a bash command in this chat's own Debian 13 sandbox: do the user's task here (set up, install, run, check) and test the code you give. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
     conversation, user = caller(ctx)
     timeout = max(1, min(timeout, MAX_TIMEOUT))
     box, note = await sandboxes.get(conversation, user)
@@ -504,7 +525,8 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     else:
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s]"
     alternatives = "" if result.hung else await apt_alternatives(box, result.output)
-    return "\n".join(part for part in (note, result.output, status, alternatives) if part)
+    limits = await limits_note(box, command)
+    return "\n".join(part for part in (note, result.output, status, alternatives, limits) if part)
 
 
 @tool()
