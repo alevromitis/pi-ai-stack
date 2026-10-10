@@ -88,6 +88,26 @@ RUN printf '%s\n' \
     && chmod 755 /usr/local/bin/sudo \
     && ln -s /usr/bin/python3 /usr/local/bin/python
 
+# No systemd here (PID 1 is sleep), but guides and gemma4-e2b reach for
+# systemctl ("systemctl: command not found" after setting up nginx):
+# start/stop/restart/reload/status go to the service's init script, and
+# enable (nothing boots here) says so, starting it with --now.
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        '# No systemd in this sandbox: systemctl ACTION UNIT -> service UNIT ACTION.' \
+        'action=; units=; now=' \
+        'for a in "$@"; do case "$a" in --now) now=1 ;; -*) ;; *) if [ -z "$action" ]; then action=$a; else units="$units ${a%.service}"; fi ;; esac; done' \
+        'case "$action" in' \
+        '  start|stop|restart|reload|force-reload|status|try-restart) for u in $units; do service "$u" "$action" || exit $?; done ;;' \
+        '  is-active) for u in $units; do if service "$u" status >/dev/null 2>&1; then echo active; else echo inactive; exit 3; fi; done ;;' \
+        '  enable|disable) echo "systemctl: no systemd here, so nothing starts at boot; service UNIT start runs it now." >&2' \
+        '    if [ -n "$now" ]; then for u in $units; do if [ "$action" = enable ]; then service "$u" start; else service "$u" stop; fi; done; fi ;;' \
+        '  daemon-reload) ;;' \
+        '  *) echo "systemctl: no systemd in this sandbox; use: service UNIT start|stop|restart|status" >&2; exit 1 ;;' \
+        'esac' \
+        > /usr/local/bin/systemctl \
+    && chmod 755 /usr/local/bin/systemctl
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]
