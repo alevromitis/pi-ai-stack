@@ -305,10 +305,25 @@ class Wiki:
             the = re.search(rf"\bthe\s+{re.escape(name)}", query, re.IGNORECASE)
             for candidate in ([f"The_{path}"] if the else []) + [path]:
                 try:
-                    return self._resolve(candidate).path
+                    return self._first_meaning(self._resolve(candidate).path)
                 except KeyError:
                     continue
         return None
+
+    def _first_meaning(self, path: str) -> str:
+        """For a page that only lists meanings, the first one it lists: asked
+        in Italian, the model searched "Cappella Sistina", got that page
+        ("may refer to: The Sistine Chapel in the Vatican Palace ...") and a
+        painter of another chapel of that name, and named him."""
+        html = bytes(self._resolve(path).get_item().content).decode("utf-8", "replace")
+        if not _disambiguation(html):
+            return path
+        link = LexborHTMLParser(html).css_first(".mw-parser-output li a[href]")
+        href = urllib.parse.unquote((link.attributes.get("href") or "") if link else "").split("#")[0]
+        try:
+            return self._resolve(href).path if href else path
+        except KeyError:
+            return path
 
 
 def bm25(query: str, passages: list[Passage], k1: float = 1.2, b: float = 0.75) -> list[Passage]:
