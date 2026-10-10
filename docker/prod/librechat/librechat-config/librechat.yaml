@@ -78,14 +78,14 @@ endpoints:
       addParams:
         top_k: 20
         min_p: 0
-      # llama-server's window is 65536 Qwen tokens (-c in the unit), and
-      # LibreChat counts with tiktoken: 61440 leaves headroom for the
+      # llama-server's window is 32768 Qwen tokens (-c in the unit), and
+      # LibreChat counts with tiktoken: 30720 leaves headroom for the
       # mismatch. Rates 0 (local).
       tokenConfig:
         'qwen3.5-9b':
           prompt: 0
           completion: 0
-          context: 61440
+          context: 30720
 
 # Web search for agents/chat. LibreChat's built-in webSearch can't be used:
 # v0.8.7 (and v0.8.8) refuse to enable it without a scraper (Firecrawl, Serper
@@ -275,11 +275,12 @@ modelSpecs:
       preset:
         endpoint: 'Qwen'
         model: 'qwen3.5-9b'
-        # The whole window (tokenConfig above). max_tokens is Qwen's
-        # recommended output length (model card), thinking included, so
-        # history gets up to 28672.
-        maxContextTokens: 61440
-        max_tokens: 32768
+        # The whole window (tokenConfig above). max_tokens is the reply,
+        # thinking included: half the window, so a long think isn't cut
+        # (Qwen recommends 32768, more than the window), and history gets
+        # up to 14336.
+        maxContextTokens: 30720
+        max_tokens: 16384
         # Qwen's thinking-mode values; top_k and min_p are the endpoint's
         # addParams. Thinking is on by default (the chat template), and
         # llama-server returns it as reasoning_content, shown as "Thoughts".

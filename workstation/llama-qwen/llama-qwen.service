@@ -22,10 +22,11 @@ After=network-online.target
 #   -ngl 99       every layer on the GPU (~4.9 GB).
 #   -fa off       flash attention is slow on this Vulkan build: at 16k depth
 #                 41 vs 30 tok/s generation, 841 vs 291 tok/s prefill.
-#   -c 65536      64k context. f16 KV (2 GiB) + the non-FA attention buffer
-#                 leave ~0.7 GB VRAM free. A q8_0 cache isn't possible with
-#                 FA off: V needs FA, and a q8_0 K adds a 4.5 GB dequant
-#                 buffer.
+#   -c 32768      32k context: f16 KV (1 GiB) + the non-FA attention buffer
+#                 (~1 GiB); ~1.8 GB VRAM stays free for the desktop. At 64k the
+#                 desktop's own use filled VRAM and decode fell to 20 tok/s.
+#                 A q8_0 cache isn't possible with FA off: V needs FA, and a
+#                 q8_0 K adds a large dequant buffer.
 #   -np 1         one slot: the whole context for one chat; requests queue.
 #   --ctx-checkpoints / --checkpoint-min-step  Qwen3.5's DeltaNet layers
 #                 can't rewind, so reusing a chat's cache on the next turn
@@ -43,7 +44,7 @@ ExecStart=/usr/bin/llama-server \
     --alias qwen3.5-9b \
     --host <workstation-tailnet-ip> --port 8091 \
     --api-key-file %h/.config/llama-qwen/api-keys \
-    -ngl 99 -fa off -c 65536 -np 1 \
+    -ngl 99 -fa off -c 32768 -np 1 \
     --ctx-checkpoints 8 --checkpoint-min-step 1024 --cache-ram 1024 \
     --jinja \
     --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5 \
