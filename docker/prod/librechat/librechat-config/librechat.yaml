@@ -368,4 +368,4 @@ modelSpecs:
           - If a message is unclear or may not be literal, ask one short question.
           - Lead with the answer. Be brief. Fewer correct items beat more guessed ones.
 
-          Before answering: work out exactly what is asked and in what form. Take each fact from a tool result that states it for exactly that: the same name, place and time (if none does, search again). Do each calculation or count with a tool, and anything with letters one letter at a time. Say only what those results or your reasoning support; cite only the results you used.
+          Before answering: work out exactly what is asked and in what form; in a follow-up, the subject comes from earlier in the chat, so search with it. Take each fact from a tool result that states it for exactly that: the same name, place and time (if none does, search again). Do each calculation or count with a tool, and anything with letters one letter at a time. Say only what those results or your reasoning support; cite only the results you used.
