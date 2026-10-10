@@ -22,6 +22,11 @@ messages since the last user turn hold results from the search tools
    nothing from (gemma4-e2b often links only one of two parallel
    searches). Links the model made up never reach the line.
 
+When no search ran since the user's message, a Sources block with no link
+in it ("Sources: []", "[Odyssey]([URL not provided])", copied from the
+prompt's citing rule) is dropped; one with real links passes untouched
+(it may cite an earlier turn's results).
+
 Text streams as before; only a line that might start a Sources block waits
 for its newline.
 
@@ -93,7 +98,10 @@ def _page(url: str, output: str) -> list[tuple[str, str]]:
 
 
 def collect(body: dict[str, Any]) -> list[list[tuple[str, str]]] | None:
-  """Per tool result since the last user message, its (title, url) sources."""
+  """Per tool result since the last user message, its (title, url) sources.
+
+  [] when there are none (the reply is still filtered), None when disabled.
+  """
   messages = body.get("messages")
   if not _ENABLED or not isinstance(messages, list):
     return None
@@ -127,7 +135,7 @@ def collect(body: dict[str, Any]) -> list[list[tuple[str, str]]] | None:
       continue
     if found:
       groups.append(found)
-  return groups or None
+  return groups
 
 
 def _line(groups: list[list[tuple[str, str]]], reply: str) -> str:
@@ -197,6 +205,8 @@ class Filter:
       held, block = "", [held]
     if has_tool_calls:
       return self._emit([held, *(block or [])])
+    if not self._sources and (block is None or _URL.search("".join(block))):
+      return self._emit([held, *(block or [])])
     # Prose the model wrote after its Sources header is kept; link lines go.
     rest = [
         line for line in "".join(block or []).splitlines()[1:]
@@ -206,6 +216,9 @@ class Filter:
     if kept and not (self._tail + held).endswith("\n"):
       kept = "\n" + kept
     text = self._emit([held + kept])
+    if not self._sources:
+      _log("dropped a Sources block with no links")
+      return text
     line = _line(self._sources, self._seen)
     _log(f"{sum(map(len, self._sources))} offered; {line[:160]}")
     if not self._wrote:
@@ -215,9 +228,9 @@ class Filter:
 
 
 def stream_filter(handler: Any) -> Filter | None:
-  """The Filter for this request, if collect() found sources (one use)."""
+  """The Filter for this request, unless disabled (one use)."""
   sources = handler.__dict__.pop("citation_sources", None)
-  return Filter(sources) if sources else None
+  return Filter(sources) if sources is not None else None
 
 
 def apply(handler: Any, text: str, has_tool_calls: bool) -> str:
