@@ -80,11 +80,11 @@ TOOLS = [
         "properties": {"expression": {"type": "string", "description": "e.g. (17*23)^2 or 15% of 80"}},
         "required": ["expression"],
     }),
-    (date_diff, "Days, weeks, months and years between two dates, with weekdays.", {
+    (date_diff, "Days, weeks, months and years between two dates, with weekdays. For \"until <date>\" without a year, use its next occurrence from today.", {
         "properties": {"start": DATE, "end": DATE},
         "required": ["start", "end"],
     }),
-    (date_add, "The date (and weekday) some days, weeks, months or years after a date; negative goes back.", {
+    (date_add, "The date and weekday some days, weeks, months or years after a date (negative goes back; none: that date's weekday).", {
         "properties": {"date": DATE, "days": INT, "weeks": INT, "months": INT, "years": INT},
         "required": ["date"],
     }),

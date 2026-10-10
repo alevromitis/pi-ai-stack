@@ -125,7 +125,11 @@ FORMATS = (
 
 
 def parse_date(text: str, today: datetime.date) -> datetime.date:
-    clean = " ".join(re.sub(r"(?<=\d)(st|nd|rd|th)\b", "", text.strip()).split())
+    clean = re.sub(r"(?<=\d)(st|nd|rd|th)\b", "", text.strip())
+    # "the 4th of July 1776", "Sept. 11, 2001"
+    clean = re.sub(r"^the\s+|(?<=\d)\s+of\b", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"\b(sep)t\b", r"\1", clean.replace(".", ""), flags=re.IGNORECASE)
+    clean = " ".join(clean.split())
     lowered = clean.lower()
     if lowered in ("today", "now", ""):
         return today
@@ -192,7 +196,9 @@ def date_add(date: str, days: int, weeks: int, months: int, years: int, today: d
         f"{'+' if n > 0 else '-'} {_plural(abs(n), u)}"
         for n, u in ((years, "year"), (months, "month"), (weeks, "week"), (days, "day")) if n
     )
-    return f"{_describe(start)} {moved or '+ 0 days'} = {_describe(result)}."
+    if not moved:
+        return f"{start.isoformat()} falls on a {start.strftime('%A')}."
+    return f"{_describe(start)} {moved} = {_describe(result)}."
 
 
 # --- counting ----------------------------------------------------------------
