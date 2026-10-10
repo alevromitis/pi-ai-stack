@@ -310,6 +310,60 @@ class Wiki:
                     continue
         return None
 
+    def proper(self, query: str) -> str:
+        """The query with the names it writes in lowercase capitalised, so
+        they are looked up by name ("population of nigeria" -> "population
+        of Nigeria", "how tall is mount fuji" -> "how tall is Mount Fuji").
+        Real users, and the pre-search that sends their words, write
+        lowercase; the model searched "population of nigeria" three times,
+        got "Islam in Nigeria" and "Ido, Nigeria", and gave up. Runs of
+        words first, longest first, then single words; see _is_name."""
+        tokens = query.split()
+        bare = [re.sub(r"^\W+|\W+$", "", t) for t in tokens]
+        taken: set[int] = set()
+        for n in (4, 3, 2, 1):
+            for lo in range(len(bare) - n + 1):
+                run = bare[lo : lo + n]
+                if taken & set(range(lo, lo + n)) or not all(w and w.islower() for w in run):
+                    continue
+                if run[0] in STOP | CONNECTORS or run[-1] in STOP | CONNECTORS or NUMBER.match(run[0]):
+                    continue
+                if any(w in STOP and w not in CONNECTORS for w in run) or len(run[0]) < 3:
+                    continue
+                # "how tall", "how old": a measure, not a name.
+                if lo and bare[lo - 1].lower() == "how":
+                    continue
+                if self._is_name(" ".join(w if w in CONNECTORS else w[:1].upper() + w[1:] for w in run)):
+                    taken |= set(range(lo, lo + n))
+        for k in sorted(taken):
+            if bare[k] not in CONNECTORS:
+                tokens[k] = tokens[k].replace(bare[k], bare[k][:1].upper() + bare[k][1:], 1)
+        return " ".join(tokens)
+
+    def _is_name(self, title: str) -> bool:
+        """Whether a lowercase phrase is a name: its article's lead writes
+        it capitalised after another word ("Federal Republic of Nigeria",
+        "The Sydney Opera House is") - or, for a run of words, opens with
+        it and is titled with it ("Mount Fuji (...) is") - and never in
+        lowercase ("the boiling point", "the name tungsten"). A single word
+        also needs a lead that defines something, not a list of meanings
+        ("Tall, a degree of height")."""
+        try:
+            entry = self._resolve(title.replace(" ", "_"))
+        except KeyError:
+            return False
+        html = bytes(entry.get_item().content).decode("utf-8", "replace")
+        if _disambiguation(html):
+            return False
+        parts = sections(html) if html else []
+        lead = " ".join([p for p in parts[0].paras if not p.startswith("Infobox:")][:2]) if parts else ""
+        if re.search(rf"\b{re.escape(title.lower())}\b", lead):
+            return False
+        after_word = re.search(rf"(?<=[\w,;] ){re.escape(title)}\b", lead) is not None
+        if " " in title:
+            return after_word or entry.title == title and lead.startswith(title)
+        return after_word and re.search(r"\b(?:is|was|are|were)\b", lead) is not None
+
     def _first_meaning(self, path: str) -> str:
         """For a page that only lists meanings, the first one it lists: asked
         in Italian, the model searched "Cappella Sistina", got that page

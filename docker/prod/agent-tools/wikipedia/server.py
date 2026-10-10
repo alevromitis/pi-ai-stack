@@ -55,6 +55,8 @@ mcp = MCPServer("wikipedia", log_level="WARNING")
 
 def _search(query: str) -> str:
     with lock:
+        # Names typed in lowercase are capitalised, so they're looked up by name.
+        query = wiki.proper(query)
         return render(query, wiki.passages(query, ARTICLES), wiki.date, RESULTS, PASSAGE_CHARS, LINK_BASE)
 
 
