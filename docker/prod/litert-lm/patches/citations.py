@@ -21,13 +21,15 @@ messages since the last user turn hold results from the search tools
    own words, not the question's: every result shares the question's
    words ("Greek", "god", "sea"), only a source holding "Poseidon" backs
    "Poseidon". So a source counts if it holds one of the answer's names
-   or long numbers that the question and queries don't (capitalised
-   words, numbers of 3+ digits or with a decimal point), or 30% (at least
-   two) of its other new words; among those, the ones scoring at least
-   half the best (a source the model linked in its text needs only to
-   back it). What the model listed in its own Sources block counts for
-   nothing: it listed "Eiffel Tower (Paris, Tennessee)" for the Paris
-   tower's height. Links the model made up never reach the line, and with
+   or numbers that the question and queries don't (capitalised words,
+   numbers of 2+ digits), or 30% (at least two) of its other new words;
+   once any source holds such a name or number, only those that do;
+   among those, the ones scoring at least half the best (a source the
+   model linked in its text needs only to back it). What the model listed
+   in its own Sources block counts for nothing: it listed "Eiffel Tower
+   (Paris, Tennessee)" for the Paris tower's height. Citations it puts in
+   its text ("[Source: Volga - Wikipedia]") are dropped too: the line at
+   the end is the reply's one list of sources. Links the model made up never reach the line, and with
    nothing backing the answer ("I don't know", or an answer from memory)
    there is no line.
    Listing every result, as before, cited "The Greek" and "The God
@@ -41,7 +43,7 @@ citing rule, or "[Calculation result](https://example.com/...)" after a
 date calculation.
 
 Text streams as before; only a line that might start a Sources block waits
-for its newline.
+for its newline, and a bracket that might start a citation for its end.
 
 Env:
   LITERT_CITATIONS=0   disable (replies pass through untouched)
@@ -68,6 +70,14 @@ _LEAD = re.compile(r"^[\s*_#>-]+")
 _INLINE = re.compile(r"(?<=\s)[*_]*Sources?[*_]*:")
 # What the end of a streamed piece may be the start of: "S", "Sour", "**Sources".
 _INLINE_START = re.compile(r"[*_]*S(?:o(?:u(?:r(?:c(?:e(?:s?[*_]*)?)?)?)?)?)?")
+# A citation in the text: "[Source: Volga - Wikipedia]", "(Sources: [A](url), B)".
+# It named a result that doesn't hold the sentence's facts (a map page for
+# a list of oblasts only Wikipedia gave), and the line at the end lists the
+# ones that do.
+_CITE = re.compile(r"[ \t]*[\[(][*_]*Sources?[*_]*:(?:\[[^\]\n]*\]\([^)\n]*\)|[^\[\]()\n])*[\])]", re.IGNORECASE)
+# What the end of a streamed piece may be the start of: " ", "[", "(Sou",
+# "[Source: Volga - Wi". Matches (maybe empty) at the end of any text.
+_CITE_OPEN = re.compile(r"[ \t]*(?:[\[(](?:[*_]*(?:s(?:o(?:u(?:r(?:c(?:e(?:s?[*_]*(?::(?:\[[^\]\n]*\]\([^)\n]*\)|\[[^\]\n]*\]?\(?[^)\n]*|[^\[\]()\n])*)?)?)?)?)?)?)?)?)?)?$", re.IGNORECASE)
 _SEARX_URL = re.compile(r"^URL: (\S+)$", re.MULTILINE)
 _SEARX_TITLE = re.compile(r"^Title: (.*)$", re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
@@ -230,18 +240,26 @@ def _line(groups: list[list[Source]], prose: str, asked: str) -> str:
       n.lower() for n in _CAPITALISED.findall(answer)
       if len(n) >= 2 and n.lower() not in _STOP | _SHORT
       and n.lower() not in asked_tokens
-  } | {w for w in new if w[0].isdigit() and (len(w) >= 3 or not w.isdigit())}
+  } | {w for w in new if w[0].isdigit()}
   # Without a name or number, a source needs a fair share of the answer's
   # words: an explanation of range() shares "sequence" and "integers"
   # with "Lazy evaluation".
   need = max(2, -(-3 * len(new - strong) // 10))
   score: dict[str, int] = {}
+  named: set[str] = set()
   for g in groups:
     for _, u, text in g:
       words = _words(text)
       tokens = {t.lower().replace(",", "") for t in _WORD.findall(text)}
       hits, other = len(strong & tokens), len((new - strong) & words)
       score[u] = 2 * hits + other if hits or other >= need else 0
+      if hits:
+        named.add(u)
+  # When some source holds the answer's names or numbers, one holding none
+  # shares only the topic's words: "took 16 years to build" was cited for
+  # an answer of 14 years, next to the two sources that said 14.
+  if named:
+    score = {u: s if u in named else 0 for u, s in score.items()}
   best = max(score.values(), default=0)
   used: dict[str, str] = {}
   for g in groups:
@@ -300,10 +318,23 @@ class Filter:
     return self._emit(out)
 
   def _continue(self, piece: str) -> str:
-    """The streamable part of a piece of a line already streaming. A
-    Sources header inside the line starts the held block there; a last word
-    that may begin one waits for the next piece."""
-    text, self._hold = self._hold + piece, ""
+    """The streamable part of a piece of a line already streaming, without
+    citations in the text (one still open waits for its end)."""
+    text, self._hold = _CITE.sub("", self._hold + piece), ""
+    cite = ""
+    opened = None if text.endswith("\n") else _CITE_OPEN.search(text)
+    if opened and len(text) - opened.start() <= 400:
+      text, cite = text[:opened.start()], text[opened.start():]
+    out = self._header(text)
+    if self._block is not None:
+      self._block[-1] += cite
+    else:
+      self._hold += cite
+    return out
+
+  def _header(self, text: str) -> str:
+    """A Sources header inside the line starts the held block there; a last
+    word that may begin one waits for the next piece."""
     # One character before it, so a header right at its start is seen.
     probe = (self._tail[-1:] or "\n") + text
     found = _INLINE.search(probe)
@@ -325,7 +356,7 @@ class Filter:
 
   def finish(self, has_tool_calls: bool) -> str:
     """Returns the rest of the reply, ending with the Sources line."""
-    held, block = self._hold + self._partial, self._block
+    held, block = _CITE.sub("", self._hold + self._partial), self._block
     if block is None and held and _HEADER.match(held):
       held, block = "", [held]
     if has_tool_calls:
@@ -346,7 +377,7 @@ class Filter:
       _log("dropped a Sources block with no known links")
       return text
     listed = "".join(block or [])
-    prose = self._seen.replace(listed, "") if listed else self._seen
+    prose = _CITE.sub("", self._seen.replace(listed, "") if listed else self._seen)
     line = _line(self._sources, prose, self._asked)
     _log(f"{sum(map(len, self._sources))} offered; {line[:160] or 'none backs the answer'}")
     if not line:
