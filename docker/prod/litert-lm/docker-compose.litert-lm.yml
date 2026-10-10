@@ -36,6 +36,10 @@ services:
       # user's message asks to remember/forget (patches/memory_gate.py),
       # 0 = every memory request runs the model and evicts the prefix cache.
       LITERT_MEMORY_GATE: "${LITERT_MEMORY_GATE:-1}"
+      # 1 = end answers built on Wikipedia/SearXNG results with a Sources
+      # line written from those results (patches/citations.py),
+      # 0 = leave citing to the model.
+      LITERT_CITATIONS: "${LITERT_CITATIONS:-1}"
     env_file:
       - .env.litert-lm
     volumes:
