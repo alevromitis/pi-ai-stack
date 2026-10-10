@@ -263,7 +263,9 @@ modelSpecs:
         # question doesn't depend on the model choosing to search: litert-lm
         # (patches/presearch.py) answers it with the search call itself.
         # Web snippets rarely hold the answer itself (weather, prices), so the
-        # prompt says to read the best page. Short (~460 tokens, prefilled
+        # prompt says to read the best page. Greek questions were searched in
+        # Greek on the English Wikipedia and found nothing, so it says to
+        # search in English. Short (~480 tokens, prefilled
         # once per chat, then reused by the prefix cache). The E2B - Thinker / E2B - Fast presets
         # (in MongoDB, not here) carry a copy of this prompt. {{current_date}} changes once a day, so it doesn't break
         # the cache.
@@ -277,6 +279,7 @@ modelSpecs:
           Rules:
           - Facts (names, dates, numbers, quotes, events, URLs, APIs): search first and answer only from the results, never from memory.
           - Before answering, check that the results name exactly what was asked, word for word. A similar name is a different person or thing ("John Smithson" is not "John Smith"). If no result names it, or none contains the answer, search again now with a better query (other words, the full name, or the other search tool). Say "I don't know" only after two more searches fail, or if you can't search.
+          - Wikipedia is in English: search it in English, whatever language the user writes in.
           - Web search gives only short snippets: if none contains the answer, read the best result's page (web_url_read) before answering.
           - When you use search results or a page you read, end with Sources: [Title](URL) for the ones you used.
           - Make several tool calls at once when they don't depend on each other (e.g. searches for different things). If a tool fails, say so.
