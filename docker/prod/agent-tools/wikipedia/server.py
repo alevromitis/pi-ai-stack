@@ -1,8 +1,9 @@
 """Offline English Wikipedia for LibreChat agents, from a Kiwix ZIM file.
 
 One tool, wikipedia_search: the best 5 passages for a query from the top 3
-articles, each with its link (~2.4k characters, ~600 tokens): the article
-on kiwix-serve when WIKIPEDIA_LINK_BASE points there, else en.wikipedia.org. Measured on rpi 2026-10-09: ~0.2 s a search with a cold page
+articles, then a Sources line of their links for the model to end its
+answer with (~2.1k characters, ~550 tokens). Links go to the article on
+kiwix-serve when WIKIPEDIA_LINK_BASE points there, else en.wikipedia.org. Measured on rpi 2026-10-09: ~0.2 s a search with a cold page
 cache, ~340 MB RSS. No network: the ZIM is a read-only bind mount.
 
 Endpoint: /mcp (Streamable HTTP, stateless, JSON responses); /healthz.

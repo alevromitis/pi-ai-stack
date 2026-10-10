@@ -221,10 +221,20 @@ def trim(text: str, limit: int) -> str:
 
 
 def render(query: str, passages: list[Passage], date: str, results: int, chars: int, link_base: str) -> str:
+    """Passages, then one ready-made Sources line the model is told to end with.
+
+    Measured 2026-10-10 (gemma4-e2b, 12 questions): a link under each
+    passage was cited 0/12; this line plus pi-chat's prompt rule, 11/12.
+    """
     lines = [f"Wikipedia (offline copy, {date[:7]}) for: {query}"]
     if not passages:
         lines.append("No results.")
-    for i, p in enumerate(passages[:results], 1):
+        return "\n".join(lines)
+    shown = passages[:results]
+    for i, p in enumerate(shown, 1):
         where = p.title + (f" › {p.section}" if p.section else "")
-        lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}\n{page_url(link_base, p.path)}")
+        lines.append(f"\n[{i}] {where}\n{trim(p.text, chars)}")
+    articles = dict.fromkeys((p.path, p.title) for p in shown)
+    links = ", ".join(f"[{title}]({page_url(link_base, path)})" for path, title in articles)
+    lines.append(f"\nEnd your answer with this line:\nSources: {links}")
     return "\n".join(lines)

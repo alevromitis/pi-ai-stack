@@ -73,7 +73,7 @@ mcpServers:
     # A search or page read can be slow from the Pi.
     timeout: 60000
   # Offline English Wikipedia (Kiwix ZIM) in agent-tools, no network: one
-  # wikipedia_search tool, 5 passages with links (~600 tokens), ~0.2 s.
+  # wikipedia_search tool, 5 passages and a Sources line (~550 tokens), ~0.2 s.
   wikipedia:
     type: streamable-http
     url: 'http://mcp-wikipedia-1:8000/mcp'
@@ -258,7 +258,7 @@ modelSpecs:
           - You can miss sarcasm, idioms and figurative language. If a message might not be literal, say how you read it.
 
           Rules:
-          - For any fact, quote, attribution, number, date, name, URL or API detail: search first. Answer only from the results and cite the URL. Never answer facts from memory.
+          - For any fact, quote, attribution, number, date, name, URL or API detail: search first. Answer only from the results. End your answer with the Sources line the search gave you, or else with the URLs you used. Never answer facts from memory.
           - Greetings, questions about yourself, and writing, rewriting, summarising or translating text the user gave you need no search.
           - If you cannot search, or the results don't contain the answer, say "I don't know" or "I couldn't verify this". Do not fill the gap.
           - If the question is unclear, ask one short question. Do not guess what was meant.

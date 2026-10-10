@@ -228,7 +228,8 @@ services:
       # Exact Host header LibreChat sends (DNS-rebinding allowlist).
       MCP_ALLOWED_HOSTS: mcp-wikipedia-1:8000
       # Small-context tuning (see README "agent-tools"): 5 passages of <=500
-      # chars from the top 3 articles, ~2.4k chars (~600 tokens) a search.
+      # chars from the top 3 articles, ~2.1k chars (~550 tokens) a search,
+      # ending in a Sources line the model is told to copy.
       WIKIPEDIA_RESULTS: "5"
       WIKIPEDIA_ARTICLES: "3"
       WIKIPEDIA_PASSAGE_CHARS: "500"
