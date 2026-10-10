@@ -106,6 +106,14 @@ def human(size: float) -> str:
     return f"{round(size, 1):g} GiB"
 
 
+# Asked for its RAM or CPUs, the model reported the host's from `free` and
+# `lscpu`; the limits come with the first result instead.
+NEW_NOTE = (
+    f"[New sandbox: Debian 13, root, cwd /work. Limits: {CPUS:g} CPU, {human(MEMORY)} RAM"
+    f" + {human(MEMORY_SWAP - MEMORY)} swap, {human(DISK_LIMIT)} disk (free and nproc show the host's).]"
+)
+
+
 def sandbox_config(conversation: str, user: str) -> dict[str, Any]:
     """The one container spec every sandbox gets. Root inside, Docker's
     default capabilities and seccomp profile minus a few, no mounts, no
@@ -215,7 +223,7 @@ class Sandboxes:
         reason = self.gone.pop(conversation, None)
         if reason:
             return box, f"[Your previous sandbox was removed ({reason}). This is a fresh one: earlier files and installs are gone.]"
-        return box, "[New sandbox: Debian 13, root, cwd /work.]"
+        return box, NEW_NOTE
 
     async def reset(self, conversation: str) -> bool:
         async with self.lock:
@@ -377,6 +385,38 @@ async def execute(box: Sandbox, argv: list[str], timeout: int) -> Result:
     return Result(None if info.get("Running") else info.get("ExitCode"), output.strip("\n"), seconds, hung)
 
 
+# apt's "Unable to locate package X" and "Package 'X' has no installation
+# candidate". gemma4-e2b gave up after the first one every time (2026-10-10:
+# openjdk-17-jdk and neofetch, both missing from Debian 13), with or without
+# a line about apt-cache search in this tool's description. It follows what
+# a result says, so the result lists what the sandbox has instead.
+_NO_PACKAGE = re.compile(r"E: (?:Unable to locate package (\S+)|Package '?([^'\s]+?)'? has no installation candidate)")
+# Packages whose name or description holds the missing name, else whose
+# names hold all its words but the version numbers (openjdk-17-jdk: openjdk,
+# jdk). Prints NOLISTS before `apt-get update` has run.
+_APT_SEARCH = (
+    'ls /var/lib/apt/lists | grep -q Packages || { echo NOLISTS; exit; }\n'
+    'r=$(apt-cache search -- "$1" | sort | head -n 10)\n'
+    '[ -n "$r" ] || { shift; r=$(apt-cache search --names-only -- "$@" | sort | head -n 10); }\n'
+    'printf %s "$r"'
+)
+
+
+async def apt_alternatives(box: Sandbox, output: str) -> str:
+    """For each package apt couldn't find, the ones it has like it."""
+    notes = []
+    for name in dict.fromkeys(m[1] or m[2] for m in _NO_PACKAGE.finditer(output)):
+        words = [w for w in re.split(r"[-_.+:]", name) if w and not w.isdigit()] or [name]
+        found = (await execute(box, ["bash", "-c", _APT_SEARCH, "apt-search", name, *words], 30)).output
+        if found == "NOLISTS":
+            notes.append(f"[No package lists yet: run `apt-get update` before installing {name}.]")
+        elif found:
+            notes.append(f"[Debian 13 has no package {name}. Packages like it (apt-cache search):\n{found}]")
+        else:
+            notes.append(f"[Debian 13 has no package {name}, and apt-cache search finds none like it.]")
+    return "\n".join(notes)
+
+
 # --- MCP ---------------------------------------------------------------------
 
 _CONVERSATION = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -448,7 +488,7 @@ def tool(destructive: bool = False) -> Callable:
 
 @tool()
 async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str:
-    """Run a bash command in this chat's own Debian sandbox. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
+    """Run a bash command in this chat's own Debian 13 sandbox. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
     conversation, user = caller(ctx)
     timeout = max(1, min(timeout, MAX_TIMEOUT))
     box, note = await sandboxes.get(conversation, user)
@@ -456,12 +496,15 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     if result.hung:
         status = f"[stopped waiting after {timeout}s: something still holds the output open; redirect background jobs: > log 2>&1 &]"
     elif result.exit_code in (124, 137) and result.seconds >= timeout:
-        status = f"[timed out after {timeout}s and was stopped; run long jobs in the background: nohup CMD > log 2>&1 &]"
+        # Most often a program reading input that never comes (gemma4-e2b ran
+        # its own number-guessing game bare, then said it awaited a guess).
+        status = f"[timed out after {timeout}s and was stopped. Reads input? There is no keyboard: pipe it in (`printf '5\\n' | CMD`). Long jobs: nohup CMD > log 2>&1 &]"
     elif result.exit_code == 137:
         status = f"[killed (exit 137), most likely by the {human(MEMORY_SWAP)} memory limit, {result.seconds:.1f}s]"
     else:
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s]"
-    return "\n".join(part for part in (note, result.output, status) if part)
+    alternatives = "" if result.hung else await apt_alternatives(box, result.output)
+    return "\n".join(part for part in (note, result.output, status, alternatives) if part)
 
 
 @tool()

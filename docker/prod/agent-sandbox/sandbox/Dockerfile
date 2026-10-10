@@ -59,6 +59,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zstd \
     && rm -rf /var/lib/apt/lists/*
 
+# Agents' own installs: no Recommends/Suggests (default-jre otherwise pulls
+# GTK and LLVM, past the 300 s command limit on the Pi), no progress output.
+RUN printf '%s\n' \
+        'APT::Install-Recommends "false";' \
+        'APT::Install-Suggests "false";' \
+        'Dpkg::Use-Pty "0";' \
+        'quiet "1";' \
+        > /etc/apt/apt.conf.d/90sandbox
+
+# Commands copied from guides start with sudo, and gemma4-e2b adds it on its
+# own even when told it is root: run them as given (already root, no
+# password). Leading sudo options are dropped; env runs VAR=value too. And
+# `python` is python3, which the model also types.
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        '# Already root: run the command as given.' \
+        'while [ $# -gt 0 ]; do' \
+        '  case "$1" in' \
+        '    -u|-g|-p|-C) shift 2 ;;' \
+        '    --) shift; break ;;' \
+        '    -*) shift ;;' \
+        '    *) break ;;' \
+        '  esac' \
+        'done' \
+        'exec env "$@"' \
+        > /usr/local/bin/sudo \
+    && chmod 755 /usr/local/bin/sudo \
+    && ln -s /usr/bin/python3 /usr/local/bin/python
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]
