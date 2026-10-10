@@ -80,7 +80,7 @@ TOOLS = [
         "properties": {"expression": {"type": "string", "description": "e.g. (17*23)^2, 15% of 80 or 06:40 - 2h - 45min"}},
         "required": ["expression"],
     }),
-    (date_diff, "Days, weeks, months and years between two dates, with weekdays.", {
+    (date_diff, "Days, weeks, months and years between two dates, with weekdays and how many are weekdays.", {
         "properties": {"start": DATE, "end": DATE},
         "required": ["start", "end"],
     }),

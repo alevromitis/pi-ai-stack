@@ -221,10 +221,16 @@ def date_diff(start: str, end: str, today: datetime.date) -> str:
     parts = [_plural(n, u) for n, u in ((years, "year"), (months, "month"), (rest, "day")) if n]
     weeks, wdays = divmod(abs(days), 7)
     sign = "-" if days < 0 else ""
+    # Asked for weekdays between two dates, the model guessed from the day
+    # count (36 for 38). Both ends included, as counting days on a calendar.
+    span = (hi - lo).days + 1
+    workdays = span // 7 * 5 + sum((lo + datetime.timedelta(i)).weekday() < 5 for i in range(span // 7 * 7, span))
     return (
         f"From {_describe(a)} to {_describe(b)}: {sign}{_plural(abs(days), 'day')}"
         f" ({_plural(weeks, 'week')} {_plural(wdays, 'day')}"
         + (f"; {', '.join(parts)}" if parts else "") + ")."
+        + f" Counting both dates: {_plural(span, 'day')}, {workdays} of them weekdays (Mon-Fri)"
+        f" and {_plural(span - workdays, 'weekend day')}."
         + (" The end is before the start." if days < 0 else "")
     )
 
