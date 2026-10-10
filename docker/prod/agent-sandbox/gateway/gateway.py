@@ -439,9 +439,26 @@ async def limits_note(box: Sandbox, command: str) -> str:
         written = None
     disk = f"{human(DISK_LIMIT)} disk" + (f", {human(written)} written so far" if written is not None else "")
     return (
-        f"[These figures are the host's. This sandbox's own limits: {CPUS:g} CPU, {human(MEMORY)} RAM"
-        f" + {human(MEMORY_SWAP - MEMORY)} swap, {disk}.]"
+        f"[Figures from /proc or the filesystem are the whole machine's. This sandbox may use only"
+        f" {CPUS:g} CPU, {human(MEMORY)} RAM + {human(MEMORY_SWAP - MEMORY)} swap and {disk}:"
+        " answer with these.]"
     )
+
+
+# Folders a failed command needed that aren't there: asked for /data/shop.db,
+# gemma4-e2b got "unable to open database file" and quietly used /work.
+_ABS_PATH = re.compile(r"(?<![\w.~$/-])/(?:[\w.@+-]+/)+[\w.@+-]+")
+_MISSING_DIRS = 'for p in "$@"; do d=$(dirname -- "$p"); [ -e "$d" ] || echo "$d"; done | sort -u | head -n 5'
+
+
+async def missing_dirs(box: Sandbox, command: str) -> str:
+    paths = list(dict.fromkeys(_ABS_PATH.findall(command)))[:20]
+    if not paths:
+        return ""
+    found = (await execute(box, ["sh", "-c", _MISSING_DIRS, "missing", *paths], 10)).output.split()
+    if not found:
+        return ""
+    return f"[These folders don't exist: {', '.join(found)}. Create them (mkdir -p) rather than switching to another path.]"
 
 
 async def apt_alternatives(box: Sandbox, output: str) -> str:
@@ -551,18 +568,24 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         lines = "1 error" if result.errors == 1 else f"{result.errors} errors"
         status = (
             f"[exit 0 from the last command, {result.seconds:.1f}s; but {lines} on stderr, the first:"
-            f" {result.first_error!r}. Earlier commands may have failed.]"
+            f" {result.first_error!r}. Earlier commands may have failed: fix the cause and run it again.]"
         )
+    elif result.exit_code:
+        # It explained failures instead of fixing them: "the API returned
+        # non-JSON data" from its own script's .json() on a text endpoint.
+        status = f"[exit {result.exit_code}, {result.seconds:.1f}s: it failed. Fix the cause and run it again, or say why it can't be done.]"
     else:
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s]"
     alternatives = "" if result.hung else await apt_alternatives(box, result.output)
     limits = await limits_note(box, command)
+    failed = result.exit_code not in (0, None) or result.errors
+    folders = await missing_dirs(box, command) if failed and not result.hung else ""
     refused = (
         "[Connection refused on the sandbox's own address: nothing listens on that port. Connections"
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
-    return "\n".join(part for part in (note, result.output, status, alternatives, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, alternatives, folders, limits, refused) if part)
 
 
 @tool()
