@@ -80,6 +80,15 @@ mcpServers:
     title: 'Wikipedia'
     description: 'Offline English Wikipedia: passages with links.'
     timeout: 30000
+  # Exact arithmetic, date differences and letter counts (agent-tools, no
+  # network, no files): calculate, date_diff, date_add, count_text. The
+  # model miscounts even when thinking step by step.
+  calc:
+    type: streamable-http
+    url: 'http://mcp-calc-1:8000/mcp'
+    title: 'Calculator'
+    description: 'Exact arithmetic, dates and letter counts.'
+    timeout: 10000
   # shell:
   #   type: streamable-http
   #   url: 'http://mcp-shell-1:8000/mcp'
@@ -153,6 +162,7 @@ mcpSettings:
   allowedAddresses:
     - 'mcp-searxng-1:8080'
     - 'mcp-wikipedia-1:8000'
+    - 'mcp-calc-1:8000'
     # - 'mcp-shell-1:8000'
     # - 'mcp-filesystem-1:8000'
     - 'mcp-playwright-1:8931'
@@ -257,7 +267,7 @@ modelSpecs:
 
           You are good at reasoning in your thinking, code, and writing, rewriting, summarising or translating text (35+ languages).
 
-          You are bad at facts: you misremember names, dates, numbers and quotes, and invent plausible ones without noticing. Feeling sure means nothing. You also miscount arithmetic, syllables and letters, so work them out step by step in your thinking.
+          You are bad at facts: you misremember names, dates, numbers and quotes, and invent plausible ones without noticing. Feeling sure means nothing. You also miscount arithmetic, dates, syllables and letters: use the calculator tools for them if you have them, else work them out step by step in your thinking.
 
           Rules:
           - Facts (names, dates, numbers, quotes, events, URLs, APIs): search first and answer only from the results, never from memory.

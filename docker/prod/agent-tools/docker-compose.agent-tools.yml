@@ -20,11 +20,13 @@ name: agent-tools
 #   mcp-playwright  :8931  headless Chromium; files to /workspace/playwright
 #   mcp-searxng     :8080  web search via searxng-1 + web_url_read (no workspace)
 #   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only
+#   mcp-calc        :8000  arithmetic, dates, letter counts; internal only
 #   kiwix-serve     :8080  the same ZIM as web pages, published ${KIWIX_PORT}
 #
 # Shell, filesystem and Playwright share ${AGENT_WORKSPACE_DIR} as
 # /workspace (uid 1000), the only host path they can touch. mcp-wikipedia
-# and kiwix-serve see only ${WIKIPEDIA_ZIM_DIR}, read-only.
+# and kiwix-serve see only ${WIKIPEDIA_ZIM_DIR}, read-only. mcp-calc sees
+# no host path.
 
 x-sandbox: &sandbox
   restart: unless-stopped
@@ -262,6 +264,34 @@ services:
           # /mnt/external is a USB disk: if it isn't mounted, fail rather
           # than create an empty directory on the root disk.
           create_host_path: false
+
+  mcp-calc:
+    <<: *sandbox
+    build:
+      context: ./calc
+    image: agent-tools-calc:local
+    container_name: mcp-calc-1
+    environment:
+      # Exact Host header LibreChat sends (DNS-rebinding allowlist).
+      MCP_ALLOWED_HOSTS: mcp-calc-1:8000
+      # date_diff/date_add read "today" in this zone (agent-connectors' too).
+      TZ: ${TZ:-Etc/UTC}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          # Python + the MCP SDK; nothing cached.
+          memory: 256M
+          pids: 64
+    # No internet, no LAN, no files: pure computation.
+    networks:
+      - internal
 
   kiwix-serve:
     <<: *sandbox
