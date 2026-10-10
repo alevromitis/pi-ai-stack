@@ -11,7 +11,10 @@ tool, the server replies at once, without the engine, with a call to that
 tool, the question as its query. LibreChat runs it and sends the results
 back; the model then only has to read and answer (and may search again).
 An arithmetic question ("what is 17*23") becomes a `calculate` call the
-same way when the Calculator tools are on.
+same way when the Calculator tools are on, and "what day of the week was
+20 July 1969?" a `date_add` call with no days added (its answer names the
+weekday). Math in words ("square root of 7921", "12 times 7") is left to
+the model, which picks the calculator itself.
 
 Which tool: wikipedia_search, or searxng_web_search for questions about now
 ("latest", "current", "today", prices, weather) or when Wikipedia is off.
@@ -82,9 +85,12 @@ _NOT_LOOKUP = re.compile(
     r"|how should|write|rewrite|translate|summari[sz]e|explain|compare|difference"
     r"|meaning of life|joke|poem|story|code|function|script|regex|bug|error"
     r"|what (?:time|day|date)|percent"
-    # Calculator questions: dates, counting letters.
+    # Calculator questions: dates, counting letters, math in words.
     r"|(?:days|weeks|months|years) (?:until|till|since|between|ago|from|after|before)"
-    r"|letters?|syllables?|characters?|the word|spell|[a-z]'s)\b|%",
+    r"|letters?|syllables?|characters?|the word|spell|[a-z]'s"
+    r"|square root|cube root|sqrt|squared|cubed|to the power|factorial"
+    r"|logarithm|log of|divided by|multiplied by|modulo"
+    r"|\d+(?:\.\d+)?\s*(?:plus|minus|times|over)\s*\d)\b|%",
     re.IGNORECASE,
 )
 _RECENT = re.compile(
@@ -100,6 +106,20 @@ _ARITHMETIC = re.compile(r"^[\d\s.,+\-*/x×÷^%()]+$")
 _OPERATOR = re.compile(r"\d\s*[+\-*/x×÷^%]\s*\(?\s*\d")
 _MATH_PREFIX = re.compile(
     r"^(?:what(?:'s| is)|calculate|compute|how much is|solve|evaluate)\b\s*",
+    re.IGNORECASE,
+)
+# "What day of the week was 20 July 1969?". Only dates date_add reads:
+# YYYY-MM-DD or a day, month name and year ("Christmas 2026" is not one).
+_MONTH = (
+    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+)
+_WEEKDAY = re.compile(
+    r"^(?:what|which) (?:day of the week|day|weekday)"
+    r" (?:was|is|will be|did|does|will)\s+(?:the\s+)?(?P<date>"
+    r"\d{4}-\d{1,2}-\d{1,2}"
+    rf"|\d{{1,2}}(?:st|nd|rd|th)? (?:of )?{_MONTH},? \d{{1,4}}"
+    rf"|{_MONTH} \d{{1,2}}(?:st|nd|rd|th)?,? \d{{1,4}})"
+    r"(?:\s+(?:fall on|fall|land on|be))?\s*\??$",
     re.IGNORECASE,
 )
 _LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
@@ -168,6 +188,13 @@ def plan(body: dict[str, Any]) -> tuple[str, dict[str, str], str] | None:
   if _ARITHMETIC.match(math) and _OPERATOR.search(math):
     calc = _tool(body, "calculate", "expression")
     return (calc, {"expression": math}, "arithmetic") if calc else None
+
+  weekday = _WEEKDAY.match(text)
+  if weekday:
+    add = _tool(body, "date_add", "date")
+    if add:
+      date = re.sub(r"(?<=\d) of ", " ", weekday.group("date"))
+      return add, {"date": date.strip(" ,.")}, "weekday"
 
   later = any(
       isinstance(m, dict) and m.get("role") == "assistant" for m in messages[:-1]
