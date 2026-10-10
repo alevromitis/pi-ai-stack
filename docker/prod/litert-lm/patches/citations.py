@@ -33,10 +33,12 @@ messages since the last user turn hold results from the search tools
    Listing every result, as before, cited "The Greek" and "The God
    Beneath the Sea" for Poseidon.
 
-When no search ran since the user's message, a Sources block with no link
-in it ("Sources: []", "[Odyssey]([URL not provided])", copied from the
-prompt's citing rule) is dropped; one with real links passes untouched
-(it may cite an earlier turn's results).
+When no search ran since the user's message, a Sources block passes
+untouched only if every link in it came from a tool result earlier in the
+chat (a follow-up citing the last turn's article). Otherwise it is dropped:
+"Sources: []", "[Odyssey]([URL not provided])" copied from the prompt's
+citing rule, or "[Calculation result](https://example.com/...)" after a
+date calculation.
 
 Text streams as before; only a line that might start a Sources block waits
 for its newline.
@@ -122,9 +124,11 @@ Source = tuple[str, str, str]
 
 
 class Offered(list):
-  """Sources per tool result; .asked is the user's message and the queries."""
+  """Sources per tool result; .asked is the user's message and the queries,
+  .known every URL any tool result in the chat gave."""
 
   asked = ""
+  known: frozenset[str] = frozenset()
 
 
 def _wikipedia(output: str) -> list[Source]:
@@ -176,6 +180,15 @@ def collect(body: dict[str, Any]) -> Offered | None:
       start = i + 1
   calls: dict[str, tuple[str, dict[str, Any]]] = {}
   groups = Offered()
+  # Links in tool results, and pages the model read (web_url_read's url).
+  groups.known = frozenset(
+      url for msg in messages if isinstance(msg, dict)
+      for text in (
+          [_text(msg.get("content"))] if msg.get("role") == "tool" else
+          [str((c.get("function") or {}).get("arguments") or "") for c in msg.get("tool_calls") or [] if isinstance(c, dict)]
+      )
+      for url in _URL.findall(text)
+  )
   asked = [_text(messages[start - 1].get("content"))] if start and isinstance(messages[start - 1], dict) else []
   for msg in messages[start:]:
     if not isinstance(msg, dict):
@@ -247,6 +260,7 @@ class Filter:
   def __init__(self, sources: list[list[Source]]):
     self._sources = sources
     self._asked = getattr(sources, "asked", "")
+    self._known = getattr(sources, "known", frozenset())
     self._partial = ""       # current line, held while it may be a header
     self._passing = False    # current line already (partly) streamed
     self._hold = ""          # end of a streaming line that may start "Sources:"
@@ -316,7 +330,8 @@ class Filter:
       held, block = "", [held]
     if has_tool_calls:
       return self._emit([held, *(block or [])])
-    if not self._sources and (block is None or _URL.search("".join(block))):
+    links = _URL.findall("".join(block or []))
+    if not self._sources and (block is None or links and set(links) <= self._known):
       return self._emit([held, *(block or [])])
     # Prose the model wrote after its Sources header is kept; link lines go.
     rest = [
@@ -328,7 +343,7 @@ class Filter:
       kept = "\n" + kept
     text = self._emit([held + kept])
     if not self._sources:
-      _log("dropped a Sources block with no links")
+      _log("dropped a Sources block with no known links")
       return text
     listed = "".join(block or [])
     prose = self._seen.replace(listed, "") if listed else self._seen
