@@ -62,6 +62,10 @@ _MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://(?:[^\s()]|\([^\s()]*\))+)\)")
 # A Sources block header: "Sources:", "**Sources:**", "### Sources", "Source:".
 _HEADER = re.compile(r"^[\s*_#>-]*sources?[\s*_]*(?::|\s*$)", re.IGNORECASE)
 _LEAD = re.compile(r"^[\s*_#>-]+")
+# The same header inside a line: "... is "Example Domain". Sources: [...](URL)".
+_INLINE = re.compile(r"(?<=\s)[*_]*Sources?[*_]*:")
+# What the end of a streamed piece may be the start of: "S", "Sour", "**Sources".
+_INLINE_START = re.compile(r"[*_]*S(?:o(?:u(?:r(?:c(?:e(?:s?[*_]*)?)?)?)?)?)?")
 _SEARX_URL = re.compile(r"^URL: (\S+)$", re.MULTILINE)
 _SEARX_TITLE = re.compile(r"^Title: (.*)$", re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
@@ -245,6 +249,7 @@ class Filter:
     self._asked = getattr(sources, "asked", "")
     self._partial = ""       # current line, held while it may be a header
     self._passing = False    # current line already (partly) streamed
+    self._hold = ""          # end of a streaming line that may start "Sources:"
     self._block: list[str] | None = None  # held Sources block lines
     self._seen = ""          # everything the model wrote, for its links
     self._tail = ""          # last characters streamed
@@ -266,21 +271,38 @@ class Filter:
       if self._block is not None:
         self._block.append(piece)
       elif self._passing:
-        out.append(piece)
-        self._passing = not piece.endswith("\n")
+        out.append(self._continue(piece))
       else:
         self._partial += piece
         if self._partial.endswith("\n"):
           if _HEADER.match(self._partial):
             self._block = [self._partial]
           else:
-            out.append(self._partial)
+            out.append(self._continue(self._partial))
           self._partial = ""
         elif not self._maybe_header(self._partial):
-          out.append(self._partial)
-          self._partial = ""
-          self._passing = True
+          partial, self._partial = self._partial, ""
+          out.append(self._continue(partial))
     return self._emit(out)
+
+  def _continue(self, piece: str) -> str:
+    """The streamable part of a piece of a line already streaming. A
+    Sources header inside the line starts the held block there; a last word
+    that may begin one waits for the next piece."""
+    text, self._hold = self._hold + piece, ""
+    # One character before it, so a header right at its start is seen.
+    probe = (self._tail[-1:] or "\n") + text
+    found = _INLINE.search(probe)
+    if found:
+      self._block = [probe[found.start():]]
+      self._passing = False
+      return probe[1:found.start()]
+    self._passing = not text.endswith("\n")
+    cut = max(probe.rfind(" "), probe.rfind("\t"), probe.rfind("\n")) + 1
+    if self._passing and cut and _INLINE_START.fullmatch(probe[cut:]):
+      self._hold = probe[cut:]
+      return probe[1:cut]
+    return text
 
   @staticmethod
   def _maybe_header(partial: str) -> bool:
@@ -289,7 +311,7 @@ class Filter:
 
   def finish(self, has_tool_calls: bool) -> str:
     """Returns the rest of the reply, ending with the Sources line."""
-    held, block = self._partial, self._block
+    held, block = self._hold + self._partial, self._block
     if block is None and held and _HEADER.match(held):
       held, block = "", [held]
     if has_tool_calls:
