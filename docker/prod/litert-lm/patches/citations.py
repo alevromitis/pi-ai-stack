@@ -22,9 +22,9 @@ messages since the last user turn hold results from the search tools
    words ("Greek", "god", "sea"), only a source holding "Poseidon" backs
    "Poseidon". So a source counts if it holds one of the answer's names
    or long numbers that the question and queries don't (capitalised
-   words, numbers of 3+ digits or with a decimal point), or two of its
-   other new words; among those, the ones scoring at least half the
-   best. Sources the model linked in its text always count, ones it
+   words, numbers of 3+ digits or with a decimal point), or 30% (at least
+   two) of its other new words; among those, the ones scoring at least
+   half the best. Sources the model linked in its text always count, ones it
    listed in its Sources block if they hold any new word. Links the
    model made up never reach the line, and with nothing backing the
    answer ("I don't know", or an answer from memory) there is no line.
@@ -76,8 +76,13 @@ their them then there these they this those through under until very were
 what when where which while will with would your today according sure
 certainly called located known also
 """.split())
-# Names in an answer: "Poseidon", "Au", "NaCl".
+# Names in an answer: "Poseidon", "Au", "NaCl"; not a capitalised "The".
 _CAPITALISED = re.compile(r"\b[A-ZÀ-ÞΑ-Ω][^\W_]+")
+_SHORT = frozenset("""
+the and but for nor yet its his her our you she him they them who how why
+was are has had not can may all any few one two six ten yes per via in on
+at to of is as by or if it we he me my so no do be an up us am
+""".split())
 
 
 def _log(text: str) -> None:
@@ -203,15 +208,20 @@ def _line(groups: list[list[Source]], prose: str, listed: str, asked: str) -> st
   new = _words(answer) - _words(asked)
   strong = {
       n.lower() for n in _CAPITALISED.findall(answer)
-      if len(n) >= 2 and n.lower() not in _STOP and n.lower() not in asked_tokens
+      if len(n) >= 2 and n.lower() not in _STOP | _SHORT
+      and n.lower() not in asked_tokens
   } | {w for w in new if w[0].isdigit() and (len(w) >= 3 or not w.isdigit())}
+  # Without a name or number, a source needs a fair share of the answer's
+  # words: an explanation of range() shares "sequence" and "integers"
+  # with "Lazy evaluation".
+  need = max(2, -(-3 * len(new - strong) // 10))
   score: dict[str, int] = {}
   for g in groups:
     for _, u, text in g:
       words = _words(text)
       tokens = {t.lower().replace(",", "") for t in _WORD.findall(text)}
       hits, other = len(strong & tokens), len((new - strong) & words)
-      score[u] = 2 * hits + other if hits or other >= 2 else 0
+      score[u] = 2 * hits + other if hits or other >= need else 0
       if u in listed and hits + other:
         score[u] = max(score[u], 1)
   best = max(score.values(), default=0)
