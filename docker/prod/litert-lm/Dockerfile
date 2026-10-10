@@ -71,15 +71,19 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 # line the server writes from those results, since the model cites
 # unpredictably. patches/presearch.py answers a plain factual question with
 # a search tool call, without the engine, so the model never skips the search.
+# patches/english.py asks for English replies to messages in other scripts:
+# the model's Greek garbles names and letters.
 # Fails the build on upstream drift.
 COPY patches/ /tmp/patches/
 RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_handler.py')")" \
     && cp /tmp/patches/prefix_cache.py /tmp/patches/memory_gate.py \
-          /tmp/patches/citations.py /tmp/patches/presearch.py "$d/" \
+          /tmp/patches/citations.py /tmp/patches/presearch.py \
+          /tmp/patches/english.py "$d/" \
     && python3 /tmp/patches/apply_prefix_cache.py "$d" \
     && python3 /tmp/patches/apply_reasoning.py "$d" \
     && python3 /tmp/patches/apply_memory_gate.py "$d" \
     && python3 /tmp/patches/apply_presearch.py "$d" \
+    && python3 /tmp/patches/apply_english.py "$d" \
     && python3 /tmp/patches/apply_citations.py "$d" \
     && rm -rf /tmp/patches
 
