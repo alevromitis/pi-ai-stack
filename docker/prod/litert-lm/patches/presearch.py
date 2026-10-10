@@ -97,6 +97,7 @@ _NOT_LOOKUP = re.compile(
     r"|what (?:time|day|date)|percent"
     # Calculator questions: dates, counting letters.
     r"|(?:days|weeks|months|years) (?:until|till|since|between|ago|from|after|before)"
+    r"|weekdays|business days|working days|weekends"
     r"|letters?|syllables?|characters?|the word|spell|[a-z]'s)\b|%",
     re.IGNORECASE,
 )
