@@ -1040,21 +1040,33 @@ def _words(text: str) -> list[str]:
     return re.findall(r"-?\d+(?:\.\d+)?|\w+", text)
 
 
+# Prompts for a person at a keyboard: gemma4-e2b's Kadane printed "Enter the
+# number of elements (N): Element 1: ..." before its answer, got "also prints
+# other text", and answered anyway.
+_PROMPT = re.compile(r"(?im)^[^\n]{0,40}?\b(?:enter|input|type|give|provide|insert)\b[^\n]{0,60}?[:?>]\s*")
+NOT_YET = " Don't answer yet: fix the code and call run_code again until it says PASS."
+
+
 def compare(output: str, expected: str) -> str:
     """PASS, or FAIL with the first difference."""
     got, want = _lines(output), _lines(expected)
     if got == want:
         return "PASS: the output is the expected output."
+    if (prompt := _PROMPT.search(output)) and not _PROMPT.search(expected):
+        return (
+            f"FAIL: the program prints prompts ({prompt.group(0).strip()[:60]!r}), but nobody types here: the input"
+            " comes from stdin. Remove every prompt and label, and print only the answer." + NOT_YET
+        )
     if _words(output) == _words(expected):
-        return "FAIL: the same values as expected, but not in the expected format (spacing, brackets, commas). Print exactly the expected format."
+        return "FAIL: the same values as expected, but not in the expected format (spacing, brackets, commas). Print exactly the expected format." + NOT_YET
     if _words(expected) and _words(output)[-len(_words(expected)):] == _words(expected):
-        return "FAIL: the answer is there, but the program also prints other text. Print only the answer, in the expected format."
+        return "FAIL: the answer is there, but the program also prints other text. Print only the answer, in the expected format." + NOT_YET
     for i, (g, w) in enumerate(zip(got, want), 1):
         if g != w:
-            return f"FAIL: line {i} is {g[:200]!r}, expected {w[:200]!r}. Find the bug, fix the code and call run_code again."
+            return f"FAIL: line {i} is {g[:200]!r}, expected {w[:200]!r}. Find the bug." + NOT_YET
     if len(got) < len(want):
-        return f"FAIL: the output stops after {len(got)} line(s); {len(want)} expected. Fix the code and call run_code again."
-    return f"FAIL: {len(got) - len(want)} line(s) more than expected. Fix the code and call run_code again."
+        return f"FAIL: the output stops after {len(got)} line(s); {len(want)} expected." + NOT_YET
+    return f"FAIL: {len(got) - len(want)} line(s) more than expected." + NOT_YET
 
 
 @tool()
@@ -1102,7 +1114,7 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
             return "\n".join(lines + [
                 f"Compile error ({lang.compile.split()[0]}, exit {built.exit_code}):",
                 built.output.strip()[-3000:],
-                "Nothing ran. Fix the code and call run_code again.",
+                "Nothing ran." + NOT_YET,
             ])
         lines.append(f"Compiled ({built.seconds:.1f} s).")
 
@@ -1122,14 +1134,16 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
     if err:
         lines.append("Errors (stderr):\n" + err)
     if rc in ("124", "137"):
-        lines.append(f"TIMEOUT: still running after {RUN_SECONDS} s: an endless loop, or it waits for more input than given. Fix the code and call run_code again.")
+        lines.append(f"TIMEOUT: still running after {RUN_SECONDS} s: an endless loop, or it waits for more input than given." + NOT_YET)
     elif rc != "0":
         hint = " It read more input than it got: give the whole example in input." if _NO_INPUT.search(err) else ""
-        lines.append(f"ERROR: the program crashed (exit {rc}).{hint} Fix the code and call run_code again.")
+        lines.append(f"ERROR: the program crashed (exit {rc}).{hint}" + NOT_YET)
     elif not out.strip():
-        lines.append("It printed nothing: the program must read the input, call the solution and print the answer.")
+        lines.append("It printed nothing: the program must read the input, call the solution and print the answer." + NOT_YET)
     elif expected.strip():
         lines.append("Expected:\n" + expected.strip("\n") + "\n" + compare(out, expected))
+    elif not input.strip():
+        lines.append("Not tested: it ran on no input. Call run_code again with an example's input and its expected output.")
     else:
         lines.append("Not checked: no expected output given. Work out the right answer for this input and call again with it as expected.")
     return "\n".join(lines)
