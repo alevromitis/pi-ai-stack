@@ -811,6 +811,39 @@ APT_STOPPED_NOTE = (
     " `pgrep -x apt-get || tail -n 3 /tmp/apt.log` until apt-get is no longer running.]"
 )
 
+# A compile that succeeds prints nothing: gemma4-e2b compiled its islands
+# counter, never ran it, and reported output it made up (1 island for a grid
+# with 2). After a command that ends with a compile, say nothing ran yet.
+_COMPILE = re.compile(
+    r"^(?:g\+\+|gcc|cc|c\+\+|clang\+\+|clang|javac|kotlinc|rustc|go\s+build|cargo\s+build|mcs|ghc|swiftc|scalac|tsc|gfortran|fpc)(?=\s|$)"
+)
+
+
+def compiled_only(command: str) -> str:
+    parts = [part.strip() for part in re.split(r"&&|\|\||;|\n", command) if part.strip()]
+    if not parts or not _COMPILE.match(parts[-1]):
+        return ""
+    step = parts[-1]
+    target = ""
+    if m := re.search(r"(?:^|\s)-o\s*(\S+)", step):
+        target = m[1] if "/" in m[1] else f"./{m[1]}"
+    elif m := re.search(r"-d\s+(\S+\.jar)(?=\s|$)", step):
+        target = f"java -jar {m[1]}"
+    elif m := re.search(r"([\w-]+)\.java(?=\s|$)", step):
+        out = re.search(r"-d\s+(\S+)", step)
+        target = f"java -cp {out[1]} {m[1]}" if out else f"java {m[1]}"
+    elif m := re.search(r"([\w./-]+)\.ts(?=\s|$)", step):
+        target = f"node {m[1]}.js"
+    elif m := re.search(r"([\w-]+)\.(?:rs|hs|swift)(?=\s|$)", step):
+        target = f"./{m[1]}"
+    elif m := re.search(r"([\w-]+)\.cs(?=\s|$)", step):
+        target = f"mono {m[1]}.exe"
+    elif re.match(r"(?:g\+\+|gcc|cc|c\+\+|clang)", step):
+        target = "./a.out"
+    run = f": printf 'INPUT' | {target}" if target else ""
+    return f"[Compiled; nothing has run yet. Run it on a test input and read its real output before saying what it prints{run}]"
+
+
 # "." as a path argument: `find .`, `du -sh .`, `ls ./` (not `. ~/.bashrc`).
 _HERE = re.compile(r"(?<=[\w-]\s)\.(?:/|\s|$)", re.M)
 
@@ -875,6 +908,8 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         # /work and said there were none.
         if _HERE.search(command):
             status = status[:-1] + f"; . is {WORKDIR}, this chat's work folder, not the whole system]"
+    if result.exit_code == 0 and not result.errors:
+        status += ("\n" + note) if (note := compiled_only(command)) else ""
     failed = result.exit_code not in (0, None) or result.errors
     # gemma4-e2b ran a failing `git commit` again unchanged ("Author identity
     # unknown" both times), then reported the failure.
