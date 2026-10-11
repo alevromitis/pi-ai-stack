@@ -768,6 +768,16 @@ async def still_running(box: Sandbox, timeout: int) -> list[str]:
     return list(dict.fromkeys(leaves))[:3]
 
 
+# An install the time limit stops leaves dpkg half done ("dpkg was
+# interrupted"), and a big one never fits: swiftlang was still unpacking
+# after 300 s on the Pi. In the background it has no limit.
+_APT_INSTALL = re.compile(r"\b(?:apt-get|apt|aptitude)\b[^\n;&|]*\binstall\b|\bdpkg\s+-i\b")
+APT_STOPPED_NOTE = (
+    "[The install was stopped part way. First run `dpkg --configure -a`. Then install in the background,"
+    " which has no time limit: `nohup apt-get install -y PACKAGE > /tmp/apt.log 2>&1 &`, and check with"
+    " `pgrep -x apt-get || tail -n 3 /tmp/apt.log` until apt-get is no longer running.]"
+)
+
 # "." as a path argument: `find .`, `du -sh .`, `ls ./` (not `. ~/.bashrc`).
 _HERE = re.compile(r"(?<=[\w-]\s)\.(?:/|\s|$)", re.M)
 
@@ -804,6 +814,8 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
             " ends by itself needs its input piped in (`printf '5\\n' | CMD`) or a count or limit"
             " (`vmstat 1 5`, `ping -c 3`, `top -b -n 1`). Long jobs: nohup CMD > log 2>&1 &]"
         )
+        if _APT_INSTALL.search(command):
+            status += "\n" + APT_STOPPED_NOTE
     elif result.exit_code == 137:
         status = f"[killed (exit 137), most likely by the {human(MEMORY_SWAP)} memory limit, {result.seconds:.1f}s]"
     elif result.exit_code == 0 and result.errors:
