@@ -481,7 +481,7 @@ async def apt_alternatives(box: Sandbox, output: str) -> str:
 
 # "X: command not found" from bash or dash, and from env (the sudo shim):
 # which package has X (the image's index of Debian 13's commands).
-_NOT_FOUND = re.compile(r"(?m)(?:^|: )([\w.+-]+): (?:command )?not found$|^env: [‘'\x22]?([\w.+-]+)[’'\x22]?: No such file or directory$")
+_NOT_FOUND = re.compile(r"(?m)(?:^|(?<!type)(?<!hash): )([\w.+-]+): (?:command )?not found$|^env: [‘'\x22]?([\w.+-]+)[’'\x22]?: No such file or directory$")
 _WHICH_PACKAGE = (
     '[ -s /usr/share/sandbox-commands.tsv ] || exit 0\n'
     'for c in "$@"; do command -v "$c" >/dev/null && continue\n'
