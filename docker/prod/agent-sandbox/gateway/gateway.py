@@ -473,6 +473,39 @@ async def missing_dirs(box: Sandbox, command: str) -> str:
     return f"[These folders don't exist: {', '.join(found)}. Create them (mkdir -p) rather than switching to another path.]"
 
 
+# Source files a failed command names that are missing or empty: gemma4-e2b
+# ran `kotlinc TwoSum.kt` on code it had only in its head, then `cat
+# TwoSum.kt > TwoSum.kt` made it an empty file, and it blamed the sandbox.
+_SOURCE = re.compile(
+    r"(?<![\w./~$-])(/?(?:[\w.@+-]+/)*[\w@+-][\w.@+-]*\.(?:py|java|kt|c|cc|cpp|cxx|h|hpp|go|rs|ts|js|mjs|rb|php"
+    r"|lua|hs|swift|scala|cs|ml|exs?|rkt|pl|r|R|jl|dart|sh))(?![\w/])"
+)
+_EMPTY_SOURCES = 'for p in "$@"; do if [ ! -e "$p" ]; then echo "missing $p"; elif [ -f "$p" ] && [ ! -s "$p" ]; then echo "empty $p"; fi; done | head -n 5'
+
+
+async def missing_sources(box: Sandbox, command: str) -> str:
+    paths = [p for p in dict.fromkeys(_SOURCE.findall(command)) if "://" not in p][:20]
+    # Relative paths are relative to /work only while the command stays there.
+    if re.search(r"(?:^|[;&|(]\s*)cd\s", command, re.M):
+        paths = [p for p in paths if p.startswith("/")]
+    if not paths:
+        return ""
+    found = (await execute(box, ["sh", "-c", _EMPTY_SOURCES, "sources", *paths], 10)).output.split("\n")
+    missing = [line[8:] for line in found if line.startswith("missing ")]
+    # Not the output of a failed compile: s.js of `tsc s.ts && node s.js`.
+    there = {p.rsplit(".", 1)[0] for p in paths if p not in missing}
+    missing = [p for p in missing if p.rsplit(".", 1)[0] not in there]
+    empty = [line[6:] for line in found if line.startswith("empty ")]
+    notes = []
+    if missing:
+        notes.append(f"{', '.join(missing)} {'does' if len(missing) == 1 else 'do'} not exist")
+    if empty:
+        notes.append(f"{', '.join(empty)} {'is' if len(empty) == 1 else 'are'} empty")
+    if not notes:
+        return ""
+    return f"[{'; '.join(notes)} (relative paths are in {WORKDIR}). Write the code to the file first (write_file), then compile and run it.]"
+
+
 async def apt_alternatives(box: Sandbox, output: str) -> str:
     """For each package apt couldn't find, the ones it has like it."""
     notes = []
@@ -858,13 +891,14 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     state = "" if result.hung else await state_note(box, command)
     limits = await limits_note(box, command)
     folders = await missing_dirs(box, command) if failed and not result.hung else ""
+    sources = await missing_sources(box, command) if failed and not result.hung else ""
     refused = (
         "[Connection refused on the sandbox's own address: nothing listens on that port. Connections"
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
     no_input = NO_INPUT_NOTE if failed and _NO_INPUT.search(result.output) and not re.search(r"[|<]", command) else ""
-    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, no_tty, no_input, privilege, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, sources, no_tty, no_input, privilege, limits, refused) if part)
 
 
 @tool()
