@@ -1168,10 +1168,10 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
         lines.append("It printed nothing: the program must read the input, call the solution and print the answer." + NOT_YET)
     elif expected.strip():
         lines.append("Expected:\n" + expected.strip("\n") + "\n" + compare(out, expected, input))
-    elif not input.strip():
-        lines.append("Not tested: it ran on no input. Call run_code again with an example's input and its expected output.")
-    else:
-        lines.append("Not checked: no expected output given. Work out the right answer for this input and call again with it as expected.")
+    # A run with no expected output is just reported: "Call run_code again
+    # with an example's input" made gemma4-e2b run a hello world a second
+    # time on an input it made up, and "work out the right answer" asks a 2B
+    # model to compute by hand what the program just computed.
     return "\n".join(lines)
 
 

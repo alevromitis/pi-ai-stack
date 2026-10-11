@@ -25,7 +25,10 @@ model wrote steps or said it couldn't change "the system I am running on",
 with the sandbox one call away; a line saying so in the run tool's own
 description didn't change that. For code it names run_code: in LeetCode-style
 chats the model compiled without running, ran files it never wrote, and
-reported output it made up.
+reported output it made up. The examples are the task's, "if it has any":
+told to test "on the examples", it ran a hello world, then ran it again on
+an input it made up ("Hello World") and told the user about that test as if
+they had asked for it.
 
 Env:
   LITERT_REMINDER=0   disable (messages pass through untouched)
@@ -64,8 +67,9 @@ def _note(messages: list[Any]) -> str:
 
 _SANDBOX = (
     "With the sandbox: do system tasks in it yourself and show the output;"
-    " test each program with run_code on the examples (input and expected"
-    " output) before giving it, and show the code and the output it really printed."
+    " run each program with run_code before giving it, on the task's examples"
+    " (input and expected output) if it has any, and show the code and the"
+    " output it really printed."
 )
 
 

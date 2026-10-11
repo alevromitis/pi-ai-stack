@@ -54,7 +54,8 @@ Code the model wrote in the sandbox reaches the answer: a reply with no
 code block, after run_code or write_file wrote a program in this turn, ends
 with that program, before any Sources line: the last one that passed its
 expected output, else the last that ran, else the last written (labelled as
-not passing, or with its file name). gemma4-e2b tested its Lua palindrome
+not passing, or with its file name), unless the reply's text before a tool
+call already showed that program. gemma4-e2b tested its Lua palindrome
 check (5/5) and answered "code shown in the previous step", which the user
 never sees; it answered nothing at all after testing its C Kadane; and it
 ended a Haskell chat with an untested rewrite that didn't compile. The user
@@ -416,6 +417,15 @@ def collect(body: dict[str, Any]) -> Offered | None:
       continue
     if found:
       groups.append(found)
+  # Already shown in the reply's text before a tool call: gemma4-e2b showed
+  # its hello world, tested it again, ended "the test case is confirmed",
+  # and got the same code appended a third time.
+  shown = " ".join("".join(
+      _text(msg.get("content")) for msg in messages[start:]
+      if isinstance(msg, dict) and msg.get("role") == "assistant"
+  ).split())
+  if groups.tested and " ".join(groups.tested[1].split()) in shown:
+    groups.tested = None
   groups.asked = "\n".join(asked)
   return groups
 
