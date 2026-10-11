@@ -14,11 +14,8 @@ name: agent-sandbox
 #             only: nothing else can reach the Docker API.
 #   egress    agent-sandbox-egress. The sandboxes, and nothing else.
 #
-#   gateway       :8000  MCP tools run / run_code / write_file / share_file /
-#                        reset; starts, execs into and removes the sandboxes
-#                        through docker-proxy. Files for the user to download
-#                        go to LibreChat's images folder (SANDBOX_SHARE_HOST_DIR),
-#                        which LibreChat serves at /images/sandbox/.
+#   gateway       :8000  MCP tools run / write_file / reset; starts, execs into
+#                        and removes the sandboxes through docker-proxy
 #   docker-proxy  :2375  Docker API, containers + exec only
 #   sandbox-image        builds agent-sandbox:local, then exits
 #
@@ -76,14 +73,6 @@ services:
       SANDBOX_DEFAULT_TIMEOUT: ${SANDBOX_DEFAULT_TIMEOUT:-900}
       SANDBOX_MAX_TIMEOUT: ${SANDBOX_MAX_TIMEOUT:-900}
       SANDBOX_OUTPUT_LIMIT: ${SANDBOX_OUTPUT_LIMIT:-8000}
-      # Downloads (.env.example): copies of files for the user, served by
-      # LibreChat at SANDBOX_SHARE_URL.
-      SANDBOX_SHARE_DIR: /shared
-      SANDBOX_SHARE_URL: /images/sandbox
-      SANDBOX_SHARE_LIMIT: ${SANDBOX_SHARE_LIMIT:-10m}
-      SANDBOX_SHARE_DAYS: ${SANDBOX_SHARE_DAYS:-30}
-    volumes:
-      - ${SANDBOX_SHARE_HOST_DIR:?set SANDBOX_SHARE_HOST_DIR in .env}:/shared
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 30s

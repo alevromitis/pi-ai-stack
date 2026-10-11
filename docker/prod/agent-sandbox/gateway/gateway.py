@@ -25,7 +25,6 @@ import os
 import re
 import secrets
 import shlex
-import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -95,13 +94,6 @@ OUTPUT_LIMIT = env_int("SANDBOX_OUTPUT_LIMIT", 8000)
 # write_file goes through exec argv; Linux caps one argument at 128 KiB.
 WRITE_LIMIT = 100_000
 REAP_INTERVAL = 30
-# Downloads: files handed to the user are copied to SHARE_DIR (mounted from
-# LibreChat's images folder, which LibreChat serves at SHARE_URL), one random
-# folder each, kept SHARE_DAYS days. No SHARE_DIR: no links, no share_file.
-SHARE_DIR = os.environ.get("SANDBOX_SHARE_DIR", "").strip()
-SHARE_URL = env("SANDBOX_SHARE_URL", "/images/sandbox").rstrip("/")
-SHARE_LIMIT = env_size("SANDBOX_SHARE_LIMIT", "10m")
-SHARE_DAYS = env_int("SANDBOX_SHARE_DAYS", 30)
 
 LABEL = "agent-sandbox.managed"
 WORKDIR = "/work"
@@ -296,14 +288,10 @@ class Sandboxes:
         log.info("removed %s: %s", box.name, reason)
 
     async def reap(self) -> None:
-        pruned = 0.0
         while True:
             await asyncio.sleep(REAP_INTERVAL)
             try:
                 await self._reap_once()
-                if SHARE_DIR and time.monotonic() - pruned > 3600:
-                    pruned = time.monotonic()
-                    await asyncio.to_thread(prune_shared)
             except Exception:
                 log.exception("reaper")
 
@@ -748,72 +736,6 @@ def is_shell(path: str, content: str) -> bool:
     return path.endswith((".sh", ".bash")) or bool(re.match(r"#!\s*\S*(?:/|env\s+)(?:ba|da)?sh\b", first))
 
 
-# --- Downloads ---------------------------------------------------------------
-
-# A folder is zipped; anything else is the file itself. Prints "SIZE PATH".
-_SHARE_PREPARE = (
-    'p=$(realpath -e -- "$1") || exit 3; '
-    'if [ -d "$p" ]; then z="/tmp/$(basename -- "$p").zip"; rm -f -- "$z"; '
-    '(cd "$(dirname -- "$p")" && zip -qr "$z" "$(basename -- "$p")") || exit 4; p=$z; fi; '
-    '[ -f "$p" ] || exit 5; echo "$(stat -c %s -- "$p") $p"'
-)
-_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
-# What the model is told to pass on; litert-lm's citations patch adds the
-# links from these lines to a reply that leaves them out.
-DOWNLOAD = "Download link for the user: [{name}]({url})"
-
-
-async def share(box: Sandbox, path: str) -> str:
-    """A copy of `path` (a folder as .zip) for the user to download, as a
-    DOWNLOAD line. Raises ToolError for what the model should hear about."""
-    found = await execute(box, ["sh", "-c", _SHARE_PREPARE, "share", path], 120)
-    if found.exit_code != 0:
-        why = {3: "there is no such file or folder", 4: "zipping the folder failed", 5: "it isn't a regular file"}
-        raise ToolError(f"Can't share {path}: {why.get(found.exit_code or 0, found.output or 'error')}.")
-    size, _, real = found.output.strip().splitlines()[-1].partition(" ")
-    if int(size) > SHARE_LIMIT:
-        raise ToolError(f"Can't share {real}: it is {human(int(size))}, over the {human(SHARE_LIMIT)} limit for downloads.")
-    # Raw stdout (execute() keeps only text, head and tail).
-    data = bytearray()
-    exe = await box.container.exec(cmd=["cat", "--", real], stdout=True, stderr=False, workdir=WORKDIR)
-    async with exe.start(detach=False) as stream:
-        while (message := await stream.read_out()) is not None:
-            data.extend(message.data)
-            if len(data) > SHARE_LIMIT:
-                raise ToolError(f"Can't share {real}: over the {human(SHARE_LIMIT)} limit for downloads.")
-    name = _UNSAFE_NAME.sub("_", real.rsplit("/", 1)[-1]).strip("._") or "file"
-    folder = secrets.token_urlsafe(12)
-
-    def save() -> None:
-        os.makedirs(f"{SHARE_DIR}/{folder}", mode=0o755)
-        with open(f"{SHARE_DIR}/{folder}/{name}", "wb") as out:
-            out.write(data)
-
-    await asyncio.to_thread(save)
-    log.info("shared %s bytes as %s/%s", len(data), folder, name)
-    return DOWNLOAD.format(name=name, url=f"{SHARE_URL}/{folder}/{name}")
-
-
-async def share_quietly(box: Sandbox, path: str) -> str:
-    """share(), or "" when sharing is off or fails: for results whose real
-    job (writing, running) already succeeded."""
-    if not SHARE_DIR:
-        return ""
-    try:
-        return await share(box, path)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        log.warning("share failed: %s", exc)
-        return ""
-
-
-def prune_shared() -> None:
-    cutoff = time.time() - SHARE_DAYS * 86400
-    with os.scandir(SHARE_DIR) as entries:
-        for entry in entries:
-            if entry.is_dir(follow_symlinks=False) and entry.stat().st_mtime < cutoff:
-                shutil.rmtree(entry.path, ignore_errors=True)
-
-
 # --- MCP ---------------------------------------------------------------------
 
 _CONVERSATION = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -870,7 +792,7 @@ def tool(destructive: bool = False) -> Callable:
             finally:
                 log.info("%s %s %s %.0fms", fn.__name__, who, outcome, (time.monotonic() - started) * 1000)
 
-        wrapper.__doc__ = (fn.__doc__ or "").format(max_timeout=MAX_TIMEOUT, share_limit=human(SHARE_LIMIT))
+        wrapper.__doc__ = (fn.__doc__ or "").format(max_timeout=MAX_TIMEOUT)
         mcp.add_tool(
             wrapper,
             structured_output=False,
@@ -1177,8 +1099,6 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
     if saved.exit_code != 0:
         raise ToolError(f"Couldn't save {path}: {saved.output or saved.exit_code}")
     lines.append(f"Saved {path}.")
-    if link := await share_quietly(box, path):
-        lines.append(link)
 
     if lang.package and (await execute(box, ["sh", "-c", f"command -v {lang.command}"], 10)).exit_code != 0:
         install = f"apt-get update -qq && apt-get install -y -qq {lang.package} > /tmp/run_code.apt 2>&1 || tail -n 5 /tmp/run_code.apt"
@@ -1246,18 +1166,7 @@ async def write_file(path: str, content: str, ctx: Context) -> str:
     # (gemma4-e2b fixed coin_change.rs three times and got that note each time).
     box.failed = None
     checked = await shellcheck(box, result.output) if is_shell(path, content) else ""
-    link = await share_quietly(box, result.output)
-    return "\n".join(part for part in (note, f"Wrote {human(size)} to {result.output}.", link, checked) if part)
-
-
-if SHARE_DIR:
-
-    @tool()
-    async def share_file(path: str, ctx: Context) -> str:
-        """Give the user a file from the sandbox to download (a folder comes as one .zip; up to {share_limit}): returns a link to put in your answer. Files written with write_file and programs tested with run_code get a link already."""
-        conversation, user = caller(ctx)
-        box, note = await sandboxes.get(conversation, user)
-        return "\n".join(part for part in (note, await share(box, path)) if part)
+    return "\n".join(part for part in (note, f"Wrote {human(size)} to {result.output}.", checked) if part)
 
 
 @tool(destructive=True)
