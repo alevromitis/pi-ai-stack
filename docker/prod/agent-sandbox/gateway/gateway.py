@@ -876,7 +876,7 @@ RUN_ENV = {"BASH_ENV": "/etc/sandbox/bashenv"}
 
 @tool()
 async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str:
-    """Run a bash command in this chat's own Debian 13 sandbox: do the user's task here (set up, install, run, check) and test the code you give. You are root in /work, with internet. Installed: python3, gcc/g++, java/javac 21, node 20 with tsc/tsx/ts-node, go, rustc/cargo, ruby, php. Install more with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
+    """Run a shell command in this chat's own Debian 13 sandbox (root, in /work, with internet; files last for this chat): do the user's task here. Has python3, gcc/g++, java 21, node with tsx, go, rust, ruby, php; install more with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. To test a program, use run_code. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
     conversation, user = caller(ctx)
     timeout = max(1, min(timeout, MAX_TIMEOUT))
     box, note = await sandboxes.get(conversation, user)
@@ -958,6 +958,171 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     exec_format = exec_format_note(result.output) if failed else ""
     no_input = NO_INPUT_NOTE if failed and _NO_INPUT.search(result.output) and not re.search(r"[|<]", command) else ""
     return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, sources, exec_format, no_tty, no_input, privilege, limits, refused) if part)
+
+
+# --- run_code --------------------------------------------------------------
+#
+# gemma4-e2b's coding chats failed between the steps, not in the algorithms:
+# it ran a file it never wrote, compiled and never ran, ran a Mono .exe as a
+# program, gave a program no input, and reported output it made up. run_code
+# is the whole loop in one call: save, install the compiler if need be,
+# compile, run on the given input, and compare with the expected output.
+
+
+@dataclass(frozen=True)
+class Language:
+    ext: str
+    compile: str  # shell in /work, {f} the source file; "" runs from source
+    run: str  # shell in /work; {f} the source file, {main} its main class
+    command: str  # the compiler or interpreter
+    package: str = ""  # Debian package with it, when it isn't in the image
+
+
+LANGUAGES = {
+    "python": Language("py", "", "python3 {f}", "python3"),
+    "javascript": Language("js", "", "node {f}", "node"),
+    "typescript": Language("ts", "", "tsx {f}", "tsx"),
+    "c": Language("c", "gcc -O2 -Wall -o solution {f} -lm", "./solution", "gcc"),
+    "cpp": Language("cpp", "g++ -O2 -std=c++20 -Wall -o solution {f}", "./solution", "g++"),
+    "java": Language("java", "javac -d . {f}", "java -cp . {main}", "javac"),
+    "go": Language("go", "go build -o solution {f}", "./solution", "go"),
+    "rust": Language("rs", "rustc --edition 2021 -O -o solution {f}", "./solution", "rustc"),
+    "ruby": Language("rb", "", "ruby {f}", "ruby"),
+    "php": Language("php", "", "php {f}", "php"),
+    "bash": Language("sh", "", "bash {f}", "bash"),
+    "perl": Language("pl", "", "perl {f}", "perl"),
+    "kotlin": Language("kt", "kotlinc {f} -include-runtime -d solution.jar", "java -jar solution.jar", "kotlinc", "kotlin"),
+    "csharp": Language("cs", "mcs -out:solution.exe {f}", "mono solution.exe", "mcs", "mono-mcs"),
+    "lua": Language("lua", "", "lua {f}", "lua", "lua5.4"),
+    "haskell": Language("hs", "ghc -O -outputdir /tmp/ghc -o solution {f}", "./solution", "ghc", "ghc"),
+    "swift": Language("swift", "swiftc -O -o solution {f}", "./solution", "swiftc", "swiftlang"),
+    "scala": Language("scala", "scalac -d . {f}", "scala -cp . {main}", "scalac", "scala"),
+}
+_LANGUAGE_NAMES = {
+    "py": "python", "python3": "python", "js": "javascript", "node": "javascript", "nodejs": "javascript",
+    "ts": "typescript", "c++": "cpp", "cxx": "cpp", "cc": "cpp", "golang": "go", "rs": "rust",
+    "kt": "kotlin", "c#": "csharp", "cs": "csharp", "rb": "ruby", "hs": "haskell", "sh": "bash", "shell": "bash",
+}
+RUN_SECONDS = 60
+_FENCE = re.compile(r"\A\s*```[\w+#-]*[^\n]*\n(.*?)\n?```\s*\Z", re.S)
+
+
+def main_class(code: str, language: str) -> str | None:
+    """The class (Java) or object (Scala) with main: the last one named
+    before main."""
+    found = re.search(r"static\s+void\s+main\s*\(" if language == "java" else r"def\s+main\s*\(|extends\s+App\b", code)
+    if not found:
+        return None
+    names = re.findall(r"\b(?:class|object|interface|enum|record)\s+(\w+)", code[: found.end()])
+    return names[-1] if names else None
+
+
+def source_name(code: str, language: str, lang: Language) -> str:
+    if language == "java" and (public := re.search(r"\bpublic\s+(?:final\s+|abstract\s+)*class\s+(\w+)", code)):
+        return f"{public[1]}.java"  # javac wants a public class in a file of its name
+    return f"solution.{lang.ext}"
+
+
+def _lines(text: str) -> list[str]:
+    return [line.rstrip() for line in text.strip("\n").split("\n")] if text.strip() else []
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"-?\d+(?:\.\d+)?|\w+", text)
+
+
+def compare(output: str, expected: str) -> str:
+    """PASS, or FAIL with the first difference."""
+    got, want = _lines(output), _lines(expected)
+    if got == want:
+        return "PASS: the output is the expected output."
+    if _words(output) == _words(expected):
+        return "FAIL: the same values as expected, but not in the expected format (spacing, brackets, commas). Print exactly the expected format."
+    if _words(expected) and _words(output)[-len(_words(expected)):] == _words(expected):
+        return "FAIL: the answer is there, but the program also prints other text. Print only the answer, in the expected format."
+    for i, (g, w) in enumerate(zip(got, want), 1):
+        if g != w:
+            return f"FAIL: line {i} is {g[:200]!r}, expected {w[:200]!r}. Find the bug, fix the code and call run_code again."
+    if len(got) < len(want):
+        return f"FAIL: the output stops after {len(got)} line(s); {len(want)} expected. Fix the code and call run_code again."
+    return f"FAIL: {len(got) - len(want)} line(s) more than expected. Fix the code and call run_code again."
+
+
+@tool()
+async def run_code(language: str, code: str, ctx: Context, input: str = "", expected: str = "") -> str:
+    """Test a program in one step: it is saved, compiled and run on the input, and its output compared with the expected output. language: python, java, c, cpp, javascript, typescript, go, rust, kotlin, csharp, ruby, php, lua, haskell, swift, scala or bash. code: the whole program; it reads the input from stdin and prints the answer. input: the example's input. expected: the example's correct output. Call it for each example before you answer, and show the code and its real output."""
+    conversation, user = caller(ctx)
+    name = language.strip().lower()
+    name = _LANGUAGE_NAMES.get(name, name)
+    lang = LANGUAGES.get(name)
+    if not lang:
+        raise ToolError(f"run_code doesn't know {language!r}. It knows {', '.join(LANGUAGES)}; for anything else use write_file and run.")
+    if fenced := _FENCE.match(code):
+        code = fenced[1]
+    if len(code.encode()) + len(input.encode()) > WRITE_LIMIT:
+        raise ToolError(f"The code and input take up to {human(WRITE_LIMIT)} together.")
+    box, note = await sandboxes.get(conversation, user)
+    lines = [note] if note else []
+    path = f"{WORKDIR}/{source_name(code, name, lang)}"
+    main = main_class(code, name) if name in ("java", "scala") else ""
+    if main is None:
+        return "\n".join(lines + [
+            "Nothing ran: no class has `public static void main(String[] args)`." if name == "java" else
+            "Nothing ran: no object has `def main(args: Array[String])`.",
+            "Add one that reads the input, calls the solution and prints the answer, then call run_code again.",
+        ])
+    stdin = input if not input or input.endswith("\n") else input + "\n"
+    save = 'printf %s "$2" > "$1" && printf %s "$3" > /tmp/run_code.in'
+    saved = await execute(box, ["sh", "-c", save, "save", path, code, stdin], 30)
+    if saved.exit_code != 0:
+        raise ToolError(f"Couldn't save {path}: {saved.output or saved.exit_code}")
+    lines.append(f"Saved {path}.")
+
+    if lang.package and (await execute(box, ["sh", "-c", f"command -v {lang.command}"], 10)).exit_code != 0:
+        install = f"apt-get update -qq && apt-get install -y -qq {lang.package} > /tmp/run_code.apt 2>&1 || tail -n 5 /tmp/run_code.apt"
+        installed = await execute(box, ["timeout", "--kill-after=5", str(MAX_TIMEOUT), "bash", "-c", install], MAX_TIMEOUT)
+        if installed.exit_code != 0:
+            return "\n".join(lines + [f"Installing {lang.package} (for {lang.command}) failed:", installed.output.strip(), APT_STOPPED_NOTE if installed.exit_code in (124, 137) else ""]).strip()
+        lines.append(f"Installed {lang.package} ({installed.seconds:.0f} s).")
+
+    file = shlex.quote(path.rsplit("/", 1)[1])
+    if lang.compile:
+        built = await execute(box, ["bash", "-c", lang.compile.format(f=file)], min(MAX_TIMEOUT, 600))
+        if built.exit_code != 0:
+            return "\n".join(lines + [
+                f"Compile error ({lang.compile.split()[0]}, exit {built.exit_code}):",
+                built.output.strip()[-3000:],
+                "Nothing ran. Fix the code and call run_code again.",
+            ])
+        lines.append(f"Compiled ({built.seconds:.1f} s).")
+
+    command = lang.run.format(f=file, main=main)
+    ran = await execute(box, ["bash", "-c",
+        f"s=$EPOCHREALTIME; timeout --kill-after=2 {RUN_SECONDS} {command} < /tmp/run_code.in > /tmp/run_code.out 2> /tmp/run_code.err;"
+        ' rc=$?; e=$EPOCHREALTIME; echo "$rc $s $e"'], RUN_SECONDS + 15)
+    rc, _, rest = ran.output.strip().partition(" ")
+    start, _, end = rest.partition(" ")
+    seconds = float(end) - float(start) if start and end else ran.seconds
+    out = (await execute(box, ["head", "-c", "4001", "/tmp/run_code.out"], 10)).output
+    err = (await execute(box, ["tail", "-c", "1500", "/tmp/run_code.err"], 10)).output.strip()
+    cut = "\n[... cut at 4000 characters]" if len(out) > 4000 else ""
+    given = "the input above" if input.strip() else "no input"
+    lines.append(f"Ran `{command}` on {given}: exit {rc}, {seconds:.1f} s.")
+    lines.append("Output:\n" + (out[:4000].rstrip("\n") + cut if out.strip() else "(nothing)"))
+    if err:
+        lines.append("Errors (stderr):\n" + err)
+    if rc in ("124", "137"):
+        lines.append(f"TIMEOUT: still running after {RUN_SECONDS} s: an endless loop, or it waits for more input than given. Fix the code and call run_code again.")
+    elif rc != "0":
+        hint = " It read more input than it got: give the whole example in input." if _NO_INPUT.search(err) else ""
+        lines.append(f"ERROR: the program crashed (exit {rc}).{hint} Fix the code and call run_code again.")
+    elif not out.strip():
+        lines.append("It printed nothing: the program must read the input, call the solution and print the answer.")
+    elif expected.strip():
+        lines.append("Expected:\n" + expected.strip("\n") + "\n" + compare(out, expected))
+    else:
+        lines.append("Not checked: no expected output given. Work out the right answer for this input and call again with it as expected.")
+    return "\n".join(lines)
 
 
 @tool()
