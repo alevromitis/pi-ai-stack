@@ -192,6 +192,12 @@ RUN mkdir -p /tmp/warm && cd /tmp/warm \
     && go build -o /dev/null main.go \
     && cd / && rm -rf /tmp/warm && echo 4102444800 > "$(go env GOCACHE)/trim.txt"
 
+# bits/stdc++.h, which C++ solutions include, takes 13 s to compile on the
+# Pi; precompiled for the gateway's run_code flags (-O2 -std=c++20) it takes
+# 2 s. Other flags compile it as before.
+RUN h=$(find /usr/include -path '*/bits/stdc++.h' | head -n 1) \
+    && g++ -O2 -std=c++20 -x c++-header -o "$h.gch" "$h"
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]
