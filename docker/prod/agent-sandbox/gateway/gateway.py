@@ -486,7 +486,7 @@ _NOT_FOUND = re.compile(r"(?m)(?:^|(?<!type)(?<!hash): )([\w.+-]+): (?:command )
 _WHICH_PACKAGE = (
     '[ -s /usr/share/sandbox-commands.tsv ] || exit 0\n'
     'for c in "$@"; do command -v "$c" >/dev/null && continue\n'
-    '  p=$(awk -F "\t" -v c="$c" \'$1 == c { print $2 }\' /usr/share/sandbox-commands.tsv | head -n 4 | paste -sd " ")\n'
+    '  p=$(awk -F "\t" -v c="$c" \'$1 == c { print $2 }\' /usr/share/sandbox-commands.tsv | head -n 8 | paste -sd " ")\n'
     '  printf "%s\\t%s\\n" "$c" "${p:--}"; done'
 )
 
@@ -503,8 +503,11 @@ async def missing_commands(box: Sandbox, output: str) -> str:
         if packages == "-":
             notes.append(f"[No Debian 13 package has a command called {name}: check the name, or install it another way (pip, npm, its own instructions).]")
         elif packages:
-            first = packages.split()[0]
-            where = f"package {first}" if first == packages else f"packages {', '.join(packages.split())}"
+            names = packages.split()
+            # The package named like the command, else the shortest: cron for
+            # crontab (not bcron, first in the alphabet), docker-cli for docker.
+            first = min(names, key=lambda p: (not (name.startswith(p) or p.startswith(name)), len(p), p))
+            where = f"package {first}" if len(names) == 1 else f"packages {', '.join(names)}"
             notes.append(f"[{name} isn't installed. Debian 13 has it in {where}: apt-get update && apt-get install -y {first}]")
     return "\n".join(notes)
 
