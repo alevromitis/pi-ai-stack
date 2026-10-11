@@ -2,8 +2,8 @@ name: agent-sandbox
 
 # Topology
 # --------
-#   A throwaway Debian container per LibreChat conversation: root shell and
-#   plain Docker networking (internet, and like any container also the LAN
+#   A Debian container per LibreChat conversation, kept (stopped) between
+#   visits to that chat: root shell and plain Docker networking (internet, and like any container also the LAN
 #   and the host's published ports: no host-side rules, by choice). LibreChat
 #   reaches the gateway over Streamable HTTP at
 #   http://agent-sandbox-gateway-1:8000/mcp; nothing is published on the host.
@@ -12,16 +12,24 @@ name: agent-sandbox
 #             external. Only the gateway is on it.
 #   docker    agent-sandbox-docker (internal: true). Gateway <-> socket proxy
 #             only: nothing else can reach the Docker API.
-#   egress    agent-sandbox-egress. The sandboxes, and nothing else.
+#   egress    agent-sandbox-egress. The sandboxes, and nothing else. External
+#             (`make up` creates it), so `make down` leaves it: a kept
+#             sandbox can start only on the network it was created on
+#             (Docker holds the network's id, not its name).
 #
-#   gateway       :8000  MCP tools run / write_file / reset; starts, execs into
-#                        and removes the sandboxes through docker-proxy
+#   gateway       :8000  MCP tools run / run_code / write_file / reset; starts,
+#                        execs into, stops and removes the sandboxes through
+#                        docker-proxy
 #   docker-proxy  :2375  Docker API, containers + exec only
 #   sandbox-image        builds agent-sandbox:local, then exits
 #
 # Sandboxes are not Compose services: the gateway creates them (one per
-# conversation, label agent-sandbox.managed=1) and removes them when idle,
-# too old, over their disk allowance, evicted, reset, or at its own stop.
+# conversation, labels agent-sandbox.managed=1 and agent-sandbox.conversation).
+# It stops them when idle, running too long, evicted, or at its own stop,
+# and starts one again when its chat calls; it removes them on reset, over
+# their disk allowance, and once kept past SANDBOX_KEEP_DAYS, SANDBOX_KEEP_MAX
+# or SANDBOX_KEEP_DISK. Kept ones are stopped containers in Docker's own
+# storage (their writable layer), not a volume: `make down` leaves them.
 
 x-hardened: &hardened
   restart: unless-stopped
@@ -73,14 +81,16 @@ services:
       SANDBOX_DEFAULT_TIMEOUT: ${SANDBOX_DEFAULT_TIMEOUT:-900}
       SANDBOX_MAX_TIMEOUT: ${SANDBOX_MAX_TIMEOUT:-900}
       SANDBOX_OUTPUT_LIMIT: ${SANDBOX_OUTPUT_LIMIT:-8000}
+      SANDBOX_KEEP_DAYS: ${SANDBOX_KEEP_DAYS:-14}
+      SANDBOX_KEEP_MAX: ${SANDBOX_KEEP_MAX:-50}
+      SANDBOX_KEEP_DISK: ${SANDBOX_KEEP_DISK:-10g}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
-    # Removes every sandbox on SIGTERM before Compose removes the egress
-    # network (which refuses to go while sandboxes are attached).
+    # Stops every running sandbox on SIGTERM (kept for its chat to resume).
     stop_grace_period: 30s
     deploy:
       resources:
@@ -101,7 +111,7 @@ services:
     image: lscr.io/linuxserver/socket-proxy:${SOCKET_PROXY_TAG:?set SOCKET_PROXY_TAG in .env}
     container_name: agent-sandbox-docker-proxy-1
     environment:
-      # /containers/* (create, start, inspect, list, delete, and
+      # /containers/* (create, start, stop, inspect, list, delete, and
       # /containers/{id}/exec) and /exec/{id}/start|json.
       CONTAINERS: "1"
       EXEC: "1"
@@ -128,8 +138,7 @@ services:
 
   sandbox-image:
     # Not a sandbox: builds agent-sandbox:local (the gateway starts the real
-    # ones from it) and, by being attached, makes Compose create the egress
-    # network. Runs `true` and exits; `make up` rebuilds nothing unless the
+    # ones from it). Runs `true` and exits; `make up` rebuilds nothing unless the
     # image is missing, so after editing sandbox/Dockerfile run
     # `docker compose -f docker-compose.agent-sandbox.yml build sandbox-image`.
     build:
@@ -159,8 +168,7 @@ networks:
       config:
         - subnet: 10.89.31.0/24
   egress:
+    # Made by `make up` (Makefile: bridge, 10.89.32.0/24), never removed by
+    # Compose: kept sandboxes hold its id. See the topology above.
     name: agent-sandbox-egress
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 10.89.32.0/24
+    external: true

@@ -1,14 +1,22 @@
-"""MCP gateway to throwaway Debian sandboxes, one per LibreChat conversation.
+"""MCP gateway to Debian sandboxes, one per LibreChat conversation.
 
 LibreChat sends X-Conversation-ID with every tool call (librechat.yaml:
 '{{LIBRECHAT_BODY_CONVERSATIONID}}', resolved per call). The first call in
 a conversation starts a fresh container from SANDBOX_IMAGE; later calls
 exec into it. A new chat is a new id, so it always starts clean. A sandbox
-is removed when idle (SANDBOX_IDLE_MINUTES), too old (SANDBOX_MAX_HOURS),
-over its disk allowance (SANDBOX_DISK_LIMIT), to make room for a newer one
-(SANDBOX_MAX_ACTIVE, least recently used first), on `reset`, and - all of
-them - when the gateway starts or stops. The next call from that chat gets
-a fresh one and is told why.
+is stopped when idle (SANDBOX_IDLE_MINUTES), running too long
+(SANDBOX_MAX_HOURS), to make room for a newer one (SANDBOX_MAX_ACTIVE,
+least recently used first), and when the gateway stops. Stopped, it keeps
+its files and installs (the container's writable layer), and the chat's
+next call - minutes or days later - starts it again, with the model told
+that nothing is running in it any more. Docker is the only record: a
+sandbox is found by its conversation label, so this survives gateway and
+host restarts. Kept sandboxes are removed after SANDBOX_KEEP_DAYS unused,
+and the least recently used first past SANDBOX_KEEP_MAX of them or
+SANDBOX_KEEP_DISK of disk. A sandbox is removed outright over its disk
+allowance (SANDBOX_DISK_LIMIT) and on `reset`; that chat's next call gets
+a fresh one and is told why. SANDBOX_KEEP_DAYS=0 keeps nothing: every
+stop is a removal, as before.
 
 This is the stack's only Docker API client (through the socket proxy), so
 it is the privileged piece: it runs nothing itself, commands go into the
@@ -28,6 +36,7 @@ import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import aiodocker
@@ -88,12 +97,18 @@ RUNTIME = os.environ.get("SANDBOX_RUNTIME", "").strip()
 MAX_ACTIVE = env_int("SANDBOX_MAX_ACTIVE", 1)
 IDLE_SECONDS = env_int("SANDBOX_IDLE_MINUTES", 30) * 60
 MAX_AGE_SECONDS = env_int("SANDBOX_MAX_HOURS", 4) * 3600
+# Stopped sandboxes kept for their chat to resume. 0 days keeps none.
+KEEP_DAYS = env_int("SANDBOX_KEEP_DAYS", 14)
+KEEP_MAX = env_int("SANDBOX_KEEP_MAX", 50)
+KEEP_DISK = env_size("SANDBOX_KEEP_DISK", "10g")
 DEFAULT_TIMEOUT = env_int("SANDBOX_DEFAULT_TIMEOUT", 300)
 MAX_TIMEOUT = env_int("SANDBOX_MAX_TIMEOUT", 300)
 OUTPUT_LIMIT = env_int("SANDBOX_OUTPUT_LIMIT", 8000)
 # write_file goes through exec argv; Linux caps one argument at 128 KiB.
 WRITE_LIMIT = 100_000
 REAP_INTERVAL = 30
+# Kept sandboxes are swept after a stop, and this often for the day limit.
+SWEEP_INTERVAL = 3600
 
 LABEL = "agent-sandbox.managed"
 WORKDIR = "/work"
@@ -105,6 +120,23 @@ def human(size: float) -> str:
             return f"{round(size, 1):g} {unit}"
         size /= 1024
     return f"{round(size, 1):g} GiB"
+
+
+def ago(seconds: float) -> str:
+    for unit, length in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        if seconds >= length:
+            n = int(seconds // length)
+            return f"{n} {unit}{'' if n == 1 else 's'} ago"
+    return "just now"
+
+
+def stopped_at(info: dict[str, Any]) -> float:
+    """When a container last stopped (epoch seconds), from its inspect data;
+    year 1 if it never ran, now if Docker's time can't be read."""
+    try:
+        return datetime.fromisoformat(info["State"]["FinishedAt"]).timestamp()
+    except (KeyError, TypeError, ValueError):
+        return time.time()
 
 
 # Asked for its RAM or CPUs, the model reported the host's from `free` and
@@ -165,66 +197,93 @@ class Sandbox:
     conversation: str
     container: DockerContainer
     name: str
-    created: float = field(default_factory=time.monotonic)
+    # Since this run of the container: created, or resumed.
+    started: float = field(default_factory=time.monotonic)
     used: float = field(default_factory=time.monotonic)
     # The last `run` command, if it failed, and its exit code.
     failed: tuple[str, int | None] | None = None
 
 
+RESUMED_NOTE = (
+    "[Resumed this chat's sandbox, stopped {ago}{why}: its files and installs are as they were, but"
+    " nothing it ran is running now. Start servers and background jobs again.]"
+)
+
+
 class Sandboxes:
     def __init__(self) -> None:
         self.docker: aiodocker.Docker | None = None
+        # Running sandboxes. Stopped ones live only in Docker.
         self.active: dict[str, Sandbox] = {}
-        # Why a conversation's sandbox went away, for its next call.
-        self.gone: dict[str, str] = {}
-        self.purged = False
+        # Why a conversation's sandbox was stopped or removed, for its next call.
+        self.why: dict[str, str] = {}
+        self.ready = False
+        # Kept sandboxes to sweep at the next reap (after a stop), and when last swept.
+        self.unswept = True
+        self.swept = time.monotonic()
         self.lock = asyncio.Lock()
 
     async def start(self) -> None:
         self.docker = aiodocker.Docker()  # DOCKER_HOST
         try:
             async with self.lock:
-                await self._purge()
+                await self._settle()
         except aiodocker.DockerError as exc:
             # Not fatal: retried before the first sandbox is created.
-            log.warning("startup purge failed, Docker API unreachable? %s", exc)
+            log.warning("startup check failed, Docker API unreachable? %s", exc)
 
     async def stop(self) -> None:
         if self.docker is None:
             return
         with contextlib.suppress(aiodocker.DockerError):
             async with self.lock:
-                await self._purge()
+                await asyncio.gather(*(self._drop(c, "the gateway stopped") for c in list(self.active)))
         await self.docker.close()
 
-    async def _purge(self) -> None:
-        """Remove every sandbox, including those of a previous gateway run."""
+    async def _list(self, conversation: str = "", status: tuple[str, ...] = ()) -> list[DockerContainer]:
+        """Every sandbox, or this conversation's; any state, or these."""
         assert self.docker is not None
-        filters = json.dumps({"label": [f"{LABEL}=1"]})
-        containers = await self.docker.containers.list(all="1", filters=filters)
-        for container in containers:
+        labels = [f"{LABEL}=1"] + ([f"agent-sandbox.conversation={conversation}"] if conversation else [])
+        filters = {"label": labels, **({"status": list(status)} if status else {})}
+        return await self.docker.containers.list(all="1", filters=json.dumps(filters))
+
+    async def _settle(self) -> None:
+        """Stop the sandboxes a previous gateway run left running (it didn't
+        get to), or remove them all if nothing is kept."""
+        stopped = 0
+        for container in await self._list():
             with contextlib.suppress(aiodocker.DockerError):
-                await container.delete(force=True)
-        if containers:
-            log.info("purged %d sandbox(es)", len(containers))
+                if not KEEP_DAYS:
+                    await container.delete(force=True)
+                    stopped += 1
+                elif container["State"] == "running":
+                    await container.stop(t=5)
+                    stopped += 1
+        if stopped:
+            log.info("%s %d sandbox(es) left over", "stopped" if KEEP_DAYS else "removed", stopped)
         self.active.clear()
-        self.purged = True
+        self.ready = True
 
     async def get(self, conversation: str, user: str) -> tuple[Sandbox, str]:
-        """This conversation's sandbox, created if needed, and a note for the
-        model when it is new."""
+        """This conversation's sandbox, resumed or created if need be, and a
+        note for the model when it wasn't running."""
         async with self.lock:
-            if not self.purged:
-                await self._purge()
+            if not self.ready:
+                await self._settle()
             box = self.active.get(conversation)
             if box is not None:
                 problem = await self._problem(box)
                 if problem is None:
                     box.used = time.monotonic()
                     return box, ""
-                await self._drop(conversation, problem)
+                # Stopped by itself (OOM, Docker restarted): resumed below.
+                del self.active[conversation]
+                self._remember(conversation, problem)
+            box, note = await self._resume(conversation)
+            if box is not None:
+                return box, note
             box = await self._create(conversation, user)
-        reason = self.gone.pop(conversation, None)
+        reason = self.why.pop(conversation, None)
         if reason:
             return box, f"[Your previous sandbox was removed ({reason}). This is a fresh one: earlier files and installs are gone.]"
         return box, NEW_NOTE
@@ -232,7 +291,12 @@ class Sandboxes:
     async def reset(self, conversation: str) -> bool:
         async with self.lock:
             existed = conversation in self.active
-            await self._drop(conversation, "reset", remember=False)
+            await self._drop(conversation, "reset", remove=True)
+            for container in await self._list(conversation):
+                existed = True
+                with contextlib.suppress(aiodocker.DockerError):
+                    await container.delete(force=True)
+            self.why.pop(conversation, None)
             return existed
 
     async def _problem(self, box: Sandbox) -> str | None:
@@ -248,13 +312,49 @@ class Sandboxes:
             return None
         if state.get("OOMKilled"):
             return f"it hit the {human(MEMORY_SWAP)} memory limit"
-        return f"its container stopped (exit {state.get('ExitCode')})"
+        return f"its container exited with code {state.get('ExitCode')}"
 
-    async def _create(self, conversation: str, user: str) -> Sandbox:
-        assert self.docker is not None
+    async def _make_room(self) -> None:
         while len(self.active) >= MAX_ACTIVE:
             oldest = min(self.active.values(), key=lambda b: b.used)
             await self._drop(oldest.conversation, "another chat needed its slot")
+
+    async def _resume(self, conversation: str) -> tuple[Sandbox | None, str]:
+        """This conversation's kept sandbox, started again, and the note for
+        the model; None if it has none or it won't start."""
+        if not KEEP_DAYS:
+            return None, ""
+        found = sorted(await self._list(conversation), key=lambda c: c["Created"])
+        if not found:
+            return None, ""
+        *older, container = found
+        for extra in older:
+            with contextlib.suppress(aiodocker.DockerError):
+                await extra.delete(force=True)
+        try:
+            info = await container.show()
+            await self._make_room()
+            if not info["State"]["Running"]:
+                await container.start()
+        except aiodocker.DockerError as exc:
+            # Its image or network gone, say: the files can't be had.
+            with contextlib.suppress(aiodocker.DockerError):
+                await container.delete(force=True)
+            log.warning("couldn't resume %s: %s", container.id[:12], exc)
+            self._remember(conversation, f"it couldn't be started again: {str(exc.message)[:200]}")
+            return None, ""
+        box = Sandbox(conversation, container, info["Name"].lstrip("/"))
+        self.active[conversation] = box
+        log.info("resumed %s (%d active)", box.name, len(self.active))
+        why = self.why.pop(conversation, None)
+        if info["State"]["Running"]:
+            # Left running outside this gateway's knowledge; nothing was lost.
+            return box, ""
+        return box, RESUMED_NOTE.format(ago=ago(max(0, time.time() - stopped_at(info))), why=f" ({why})" if why else "")
+
+    async def _create(self, conversation: str, user: str) -> Sandbox:
+        assert self.docker is not None
+        await self._make_room()
         name = f"agent-sandbox-{conversation[:8]}-{secrets.token_hex(2)}"
         # create + start, not containers.run(): that pulls on a missing image,
         # which the proxy refuses (403) and which isn't wanted anyway.
@@ -275,17 +375,27 @@ class Sandboxes:
         log.info("created %s (%d active)", name, len(self.active))
         return box
 
-    async def _drop(self, conversation: str, reason: str, remember: bool = True) -> None:
+    def _remember(self, conversation: str, reason: str) -> None:
+        self.why[conversation] = reason
+        while len(self.why) > 256:
+            self.why.pop(next(iter(self.why)))
+
+    async def _drop(self, conversation: str, reason: str, remove: bool = False) -> None:
+        """Stop this conversation's sandbox, kept for it to resume; or
+        remove it (remove=True, and always when nothing is kept)."""
         box = self.active.pop(conversation, None)
         if box is None:
             return
-        if remember:
-            self.gone[conversation] = reason
-            while len(self.gone) > 256:
-                self.gone.pop(next(iter(self.gone)))
+        remove = remove or not KEEP_DAYS
+        self._remember(conversation, reason)
         with contextlib.suppress(aiodocker.DockerError):
-            await box.container.delete(force=True)
-        log.info("removed %s: %s", box.name, reason)
+            if remove:
+                await box.container.delete(force=True)
+            else:
+                # PID 1 (docker-init) ends at SIGTERM, and the rest with it.
+                await box.container.stop(t=5)
+                self.unswept = True
+        log.info("%s %s: %s", "removed" if remove else "stopped", box.name, reason)
 
     async def reap(self) -> None:
         while True:
@@ -297,14 +407,14 @@ class Sandboxes:
 
     async def _reap_once(self) -> None:
         now = time.monotonic()
-        verdicts: list[tuple[Sandbox, str]] = []
+        verdicts: list[tuple[Sandbox, str, bool]] = []
         # Disk usage is measured outside the lock: `size` walks the
         # container's whole writable layer and would hold up tool calls.
         for box in list(self.active.values()):
             if now - box.used > IDLE_SECONDS:
-                verdicts.append((box, f"idle for over {IDLE_SECONDS // 60} minutes"))
-            elif now - box.created > MAX_AGE_SECONDS:
-                verdicts.append((box, f"older than {MAX_AGE_SECONDS // 3600} hours"))
+                verdicts.append((box, f"idle for over {IDLE_SECONDS // 60} minutes", False))
+            elif now - box.started > MAX_AGE_SECONDS:
+                verdicts.append((box, f"running for over {MAX_AGE_SECONDS // 3600} hours", False))
             else:
                 try:
                     info = await box.container.show(size="1")
@@ -312,14 +422,60 @@ class Sandboxes:
                     continue
                 written = info.get("SizeRw") or 0
                 if written > DISK_LIMIT:
-                    verdicts.append((box, f"it wrote {human(written)}, over the {human(DISK_LIMIT)} disk limit"))
-        if not verdicts:
+                    verdicts.append((box, f"it wrote {human(written)}, over the {human(DISK_LIMIT)} disk limit", True))
+        if verdicts:
+            async with self.lock:
+                for box, reason, remove in verdicts:
+                    # Still the same sandbox (not reset and recreated meanwhile)?
+                    if self.active.get(box.conversation) is box:
+                        await self._drop(box.conversation, reason, remove)
+        if KEEP_DAYS and self.ready and (self.unswept or now - self.swept > SWEEP_INTERVAL):
+            await self._sweep()
+
+    async def _sweep(self) -> None:
+        """Remove kept sandboxes unused for over KEEP_DAYS, then those past
+        the KEEP_MAX most recently used, or past KEEP_DISK in all."""
+        self.unswept, self.swept = False, time.monotonic()
+        # Sizes and stop times are read outside the lock, like the reaper's.
+        kept = []
+        for container in await self._list(status=("created", "exited", "dead")):
+            try:
+                info = await container.show(size="1")
+            except aiodocker.DockerError:
+                continue
+            kept.append((stopped_at(info), info.get("SizeRw") or 0, container, info))
+        # Most recently stopped first: those are kept while they fit.
+        kept.sort(key=lambda k: k[0], reverse=True)
+        now, count, total, doomed = time.time(), 0, 0, []
+        for stopped, size, container, info in kept:
+            if now - stopped > KEEP_DAYS * 86400:
+                reason = f"unused for over {KEEP_DAYS} days"
+            elif count >= KEEP_MAX:
+                reason = f"only the {KEEP_MAX} most recently used sandboxes are kept"
+            elif total + size > KEEP_DISK:
+                reason = f"kept sandboxes may take {human(KEEP_DISK)} of disk in all"
+            else:
+                count += 1
+                total += size
+                continue
+            doomed.append((container, info, reason))
+        if not doomed:
             return
         async with self.lock:
-            for box, reason in verdicts:
-                # Still the same sandbox (not reset and recreated meanwhile)?
-                if self.active.get(box.conversation) is box:
-                    await self._drop(box.conversation, reason)
+            # One resumed meanwhile is running: not removed (and without
+            # force, Docker refuses to remove a running container anyway).
+            running = {box.container.id for box in self.active.values()}
+            for container, info, reason in doomed:
+                if container.id in running:
+                    continue
+                try:
+                    await container.delete()
+                except aiodocker.DockerError:
+                    continue
+                conversation = (info["Config"].get("Labels") or {}).get("agent-sandbox.conversation", "")
+                if conversation:
+                    self._remember(conversation, f"it was kept stopped, then removed: {reason}")
+                log.info("removed kept %s: %s", info["Name"].lstrip("/"), reason)
 
 
 sandboxes = Sandboxes()

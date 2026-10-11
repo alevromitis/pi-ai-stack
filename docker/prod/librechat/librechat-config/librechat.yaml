@@ -171,16 +171,17 @@ mcpServers:
   #   url: 'http://mcp-nextcloud-1:8000/calendar-add/mcp'
   #   title: 'Calendar Add Only'
   #   description: 'List events and tasks, add new ones; never changes existing entries.'
-  # The agent-sandbox stack: a throwaway Debian container per conversation
-  # (root shell, internet), over agent-sandbox-internal.
-  # The conversation id picks the sandbox, so a new chat gets a fresh one.
+  # The agent-sandbox stack: a Debian container per conversation (root
+  # shell, internet), over agent-sandbox-internal.
+  # The conversation id picks the sandbox, so a new chat gets a fresh one
+  # and an old chat, reopened, gets its own back (kept stopped meanwhile).
   # LibreChat resolves {{LIBRECHAT_BODY_*}} on every tool call, and opens a
   # connection per call for a server that uses them.
   sandbox:
     type: streamable-http
     url: 'http://agent-sandbox-gateway-1:8000/mcp'
     title: 'Debian Sandbox'
-    description: 'Fresh Debian container per chat: root shell, internet.'
+    description: 'A Debian container per chat, kept for when you come back: root shell, internet.'
     headers:
       X-Conversation-ID: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
       X-User-ID: '{{LIBRECHAT_USER_ID}}'
