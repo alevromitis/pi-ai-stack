@@ -1058,12 +1058,23 @@ _PROMPT = re.compile(r"(?im)^[^\n]{0,40}?\b(?:enter|input|type|give|provide|inse
 NOT_YET = " Don't answer yet: fix the code and call run_code again until it says PASS."
 
 
-def compare(output: str, expected: str) -> str:
+def find_prompt(output: str, given: str) -> re.Match | None:
+    """A prompt in the output, not a label that shows the input's own values:
+    gemma4-e2b's LeetCode 128 printed "Input: [100, 4, 200, 1, 3, 2]" over
+    its own test results, and was told nobody types here."""
+    for prompt in _PROMPT.finditer(output):
+        rest = _words(output[prompt.end():].split("\n", 1)[0])
+        if not rest or not set(rest) <= set(_words(given)):
+            return prompt
+    return None
+
+
+def compare(output: str, expected: str, given: str = "") -> str:
     """PASS, or FAIL with the first difference."""
     got, want = _lines(output), _lines(expected)
     if got == want:
         return "PASS: the output is the expected output."
-    if (prompt := _PROMPT.search(output)) and not _PROMPT.search(expected):
+    if (prompt := find_prompt(output, given)) and not _PROMPT.search(expected):
         return (
             f"FAIL: the program prints prompts ({prompt.group(0).strip()[:60]!r}), but nobody types here: the input"
             " comes from stdin. Remove every prompt and label, and print only the answer." + NOT_YET
@@ -1156,7 +1167,7 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
     elif not out.strip():
         lines.append("It printed nothing: the program must read the input, call the solution and print the answer." + NOT_YET)
     elif expected.strip():
-        lines.append("Expected:\n" + expected.strip("\n") + "\n" + compare(out, expected))
+        lines.append("Expected:\n" + expected.strip("\n") + "\n" + compare(out, expected, input))
     elif not input.strip():
         lines.append("Not tested: it ran on no input. Call run_code again with an example's input and its expected output.")
     else:
