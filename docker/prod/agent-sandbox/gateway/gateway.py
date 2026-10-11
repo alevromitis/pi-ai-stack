@@ -659,8 +659,12 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         # It explained failures instead of fixing them: "the API returned
         # non-JSON data" from its own script's .json() on a text endpoint.
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s: it failed. Fix the cause and run it again, or say why it can't be done.]"
-    else:
+    elif result.output.strip():
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s]"
+    else:
+        # gemma4-e2b's status check printed nothing (`read` got no newline
+        # from curl -w) and it answered with the "UP" it expected.
+        status = f"[exit {result.exit_code}, {result.seconds:.1f}s, no output]"
     failed = result.exit_code not in (0, None) or result.errors
     # gemma4-e2b ran a failing `git commit` again unchanged ("Author identity
     # unknown" both times), then reported the failure.
