@@ -880,6 +880,17 @@ _HERE = re.compile(r"(?<=[\w-]\s)\.(?:/|\s|$)", re.M)
 
 # The image's bashenv: each command reads ~/.bashrc, with aliases on.
 RUN_ENV = {"BASH_ENV": "/etc/sandbox/bashenv"}
+# LibreChat shows a tool's result as plain text, but its arguments squeezed
+# onto one line behind a second click: a result that starts with the command
+# reads like a terminal. Long commands (a heredoc with a whole file) are cut.
+SHOWN_COMMAND = 600
+
+
+def prompt_line(command: str) -> str:
+    """The command as a shell prompt line, "$ ls -la"."""
+    command = command.strip()
+    more = len(command) - SHOWN_COMMAND
+    return "$ " + (command if more <= 0 else command[:SHOWN_COMMAND] + f" [... {more} more characters]")
 
 
 @tool()
@@ -966,7 +977,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     exec_format = exec_format_note(result.output) if failed else ""
     go_mod = GO_MOD_NOTE if failed and "go.mod file not found" in result.output else ""
     no_input = NO_INPUT_NOTE if failed and _NO_INPUT.search(result.output) and not re.search(r"[|<]", command) else ""
-    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, sources, exec_format, go_mod, no_tty, no_input, privilege, limits, refused) if part)
+    return "\n".join(part for part in (note, prompt_line(command), result.output, status, state, syntax, alternatives, commands, folders, sources, exec_format, go_mod, no_tty, no_input, privilege, limits, refused) if part)
 
 
 # --- run_code --------------------------------------------------------------
@@ -1109,14 +1120,15 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
 
     file = shlex.quote(path.rsplit("/", 1)[1])
     if lang.compile:
-        built = await execute(box, ["bash", "-c", lang.compile.format(f=file)], min(MAX_TIMEOUT, 600))
+        compile_command = lang.compile.format(f=file)
+        built = await execute(box, ["bash", "-c", compile_command], min(MAX_TIMEOUT, 600))
         if built.exit_code != 0:
             return "\n".join(lines + [
                 f"Compile error ({lang.compile.split()[0]}, exit {built.exit_code}):",
                 built.output.strip()[-3000:],
                 "Nothing ran." + NOT_YET,
             ])
-        lines.append(f"Compiled ({built.seconds:.1f} s).")
+        lines.append(f"Compiled with `{compile_command}` ({built.seconds:.1f} s).")
 
     command = lang.run.format(f=file, main=main)
     ran = await execute(box, ["bash", "-c",
@@ -1129,6 +1141,9 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
     err = (await execute(box, ["tail", "-c", "1500", "/tmp/run_code.err"], 10)).output.strip()
     cut = "\n[... cut at 4000 characters]" if len(out) > 4000 else ""
     given = "the input above" if input.strip() else "no input"
+    if input.strip():
+        shown = input.strip("\n")
+        lines.append("Input:\n" + (shown[:1500] + "\n[... cut at 1500 characters]" if len(shown) > 1500 else shown))
     lines.append(f"Ran `{command}` on {given}: exit {rc}, {seconds:.1f} s.")
     lines.append("Output:\n" + (out[:4000].rstrip("\n") + cut if out.strip() else "(nothing)"))
     if err:
