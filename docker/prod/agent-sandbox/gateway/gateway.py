@@ -512,6 +512,21 @@ async def missing_commands(box: Sandbox, output: str) -> str:
     return "\n".join(notes)
 
 
+# Programs that ask for a password or a yes on the terminal fail here, with
+# messages that don't say so: gpg's "problem with the agent: Inappropriate
+# ioctl for device", passwd's "Authentication token manipulation error".
+# gemma4-e2b gave up on gpg, and said passwd had set the password.
+_NO_TTY = re.compile(
+    r"Inappropriate ioctl for device|Authentication token manipulation error|cannot open /dev/tty|"
+    r"[Nn]o tty|not a tty|is not a terminal|a terminal is required|[Nn]ot a terminal|Device not configured"
+)
+NO_TTY_NOTE = (
+    "[No terminal here: nothing can ask for a password or a yes. Give it in the command:"
+    " gpg --batch --pinentry-mode loopback --passphrase PW ..., echo 'user:PW' | chpasswd,"
+    " psql -c \"ALTER USER x PASSWORD 'PW'\", -y or --yes flags.]"
+)
+
+
 # Root in a container without kernel privileges: gemma4-e2b took dockerd's
 # failure for a PATH problem, and keeps retrying firewall rules.
 _NO_PRIVILEGE = re.compile(r"you must be root|Operation not permitted|Read-only file system|permission denied on key")
@@ -771,6 +786,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     # "conditional binary operator expected".
     syntax = await shellcheck(box, text=command) if result.exit_code == 2 and "syntax error" in result.output else ""
     privilege = NO_PRIVILEGE_NOTE if _NO_PRIVILEGE.search(result.output) else ""
+    no_tty = NO_TTY_NOTE if _NO_TTY.search(result.output) else ""
     state = "" if result.hung else await state_note(box, command)
     limits = await limits_note(box, command)
     folders = await missing_dirs(box, command) if failed and not result.hung else ""
@@ -779,7 +795,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
-    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, privilege, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, no_tty, privilege, limits, refused) if part)
 
 
 @tool()
