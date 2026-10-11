@@ -342,6 +342,11 @@ _ERRORISH = re.compile(
     r"No such file|not found|cannot|can't|[Ee]rror|ERROR|[Ff]ailed|FAILED|[Dd]enied|[Ii]nvalid"
     r"|[Ff]atal|Traceback|unexpected|[Uu]nable to|not permitted|[Ss]yntax|[Uu]sage:|unrecognized|missing"
 )
+# What a package's install says in any container, all well: services are
+# started by hand here. Counted as errors, it read "but 2 errors ... Earlier
+# commands may have failed" after a redis install, and gemma4-e2b said the
+# server hadn't started (it had).
+_NOT_ERRORS = re.compile(r"invoke-rc\.d: (?:policy-rc\.d denied execution|could not determine current runlevel)")
 
 
 @dataclass
@@ -400,7 +405,10 @@ async def execute(box: Sandbox, argv: list[str], timeout: int, env: dict[str, st
         output += f"[... {human(cut)} of output cut ...]\n"
     output += end
     box.used = time.monotonic()
-    lines = [line.strip() for line in clean(bytes(stderr)).splitlines() if _ERRORISH.search(line)]
+    lines = [
+        line.strip() for line in clean(bytes(stderr)).splitlines()
+        if _ERRORISH.search(line) and not _NOT_ERRORS.search(line)
+    ]
     return Result(
         None if info.get("Running") else info.get("ExitCode"), output.strip("\n"), seconds, hung,
         len(lines), lines[0][:120] if lines else "",
