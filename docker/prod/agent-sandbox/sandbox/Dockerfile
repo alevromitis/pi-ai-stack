@@ -171,7 +171,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # (require('lodash') after npm i -g lodash; @types/node for process).
 # Without a tsconfig.json, ts-node picks Node 16's module setting, and Node
 # 20 then fails on the file: "Unknown file extension .ts". CommonJS runs it.
-ENV TS_NODE_COMPILER_OPTIONS={\"module\":\"commonjs\"}
+# Not strict: gemma4-e2b's working script stopped at "implicitly has an
+# 'any' type", and it said the sandbox couldn't run TypeScript.
+ENV TS_NODE_COMPILER_OPTIONS={\"module\":\"commonjs\",\"strict\":false}
 RUN npm install -g typescript@5 tsx ts-node @types/node \
     && ln -s "$(npm root -g)" /node_modules \
     && npm cache clean --force
