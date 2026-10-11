@@ -1,6 +1,6 @@
 # Qwen3.5-9B on the workstation's Arc B570 (llama.cpp, Vulkan), for
 # LibreChat on rpi. A systemd *user* unit: it runs while the user is logged
-# in; when it is down, librechat-router-1 on rpi answers with Gemma on the Pi.
+# in; while it is down, LibreChat's Qwen chats fail.
 #
 # Install (README "Qwen on the workstation"):
 #   install -Dm644 llama-qwen.service ~/.config/systemd/user/llama-qwen.service
@@ -9,7 +9,7 @@
 # Needs the Arch `llama-cpp` package (ggml-vulkan), the model at
 # ~/models/Qwen3.5-9B-Q4_K_M.gguf, and ~/.config/llama-qwen/api-keys (mode
 # 600, one key per line; the same key is QWEN_API_KEY in librechat's
-# .env.router).
+# .env.librechat).
 
 [Unit]
 Description=llama-server: Qwen3.5-9B for LibreChat

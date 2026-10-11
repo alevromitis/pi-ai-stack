@@ -52,14 +52,13 @@ endpoints:
           prompt: 0
           completion: 0
           context: 13312
-    # Qwen3.5-9B on the workstation's GPU (workstation/llama-qwen), through
-    # librechat-router-1 (router/router.py). While the workstation is off or
-    # its server down, the router sends each request to litert-lm-1 as the
-    # E2B - Thinker preset would. The router is internal and needs no key;
-    # the workstation's key is in .env.router.
+    # Qwen3.5-9B on the workstation's GPU (workstation/llama-qwen), over the
+    # tailnet. No fallback: while the workstation is off, requests fail;
+    # switch to a LiteRT-LM spec or preset by hand. URL and key are in
+    # .env.librechat, like LiteRT-LM's.
     - name: 'Qwen'
-      apiKey: 'router'
-      baseURL: 'http://librechat-router-1:8000/v1'
+      apiKey: '${QWEN_API_KEY}'
+      baseURL: '${QWEN_BASE_URL}'
       models:
         fetch: false
         default:
@@ -73,8 +72,7 @@ endpoints:
       # Qwen's recommended thinking-mode sampling (model card): temperature
       # 1.0, top_p 0.95, top_k 20, min_p 0, presence_penalty 1.5. The
       # parameters panel has no top_k/min_p, so they go on every request;
-      # the rest are set per preset or spec. The router replaces all of them
-      # with the preset's when Gemma answers.
+      # the rest are set per preset or spec.
       addParams:
         top_k: 20
         min_p: 0
@@ -262,11 +260,11 @@ modelSpecs:
     # new chats keep whatever was last chosen, or the default preset (in
     # MongoDB: "Qwen 9B - Thinker", a copy of this spec). Wikipedia, web
     # search and the calculator are on; the browser and sandbox are added
-    # from the input bar. While the workstation is down, Gemma on the Pi
-    # answers with the E2B - Thinker preset, these tools included.
+    # from the input bar. While the workstation is down, pick the LiteRT-LM
+    # spec or an E2B preset by hand.
     - name: 'qwen-chat'
       label: 'Qwen3.5 9B'
-      description: 'Qwen3.5-9B on the workstation GPU, with search and calculator. Gemma on the Pi answers while the workstation is off.'
+      description: 'Qwen3.5-9B on the workstation GPU, with search and calculator. Needs the workstation on; use LiteRT-LM otherwise.'
       softDefault: true
       mcpServers:
         - 'wikipedia'
@@ -286,10 +284,6 @@ modelSpecs:
         temperature: 1.0
         top_p: 0.95
         presence_penalty: 1.5
-        # The router finds this prompt at the start of the system message
-        # ({{current_date}} matched as a wildcard) to swap in the Gemma
-        # preset's while the Pi answers; keep {{...}} variables to the ones
-        # LibreChat fills.
         promptPrefix: |
           You are Qwen3.5-9B, an open model from Alibaba's Qwen team, running locally on the user's workstation GPU. Today is {{current_date}}; your training data is older, so recent events are unknown to you.
 
