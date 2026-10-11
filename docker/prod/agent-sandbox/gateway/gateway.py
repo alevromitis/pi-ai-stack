@@ -166,6 +166,8 @@ class Sandbox:
     name: str
     created: float = field(default_factory=time.monotonic)
     used: float = field(default_factory=time.monotonic)
+    # The last `run` command, if it failed, and its exit code.
+    failed: tuple[str, int | None] | None = None
 
 
 class Sandboxes:
@@ -546,19 +548,62 @@ def tool(destructive: bool = False) -> Callable:
     return decorator
 
 
+async def still_running(box: Sandbox, timeout: int) -> list[str]:
+    """Just before `timeout` stops a command, what it is still running: the
+    innermost processes under it."""
+    await asyncio.sleep(max(timeout - 2, timeout * 0.8))
+    table = (await execute(box, ["ps", "-eo", "pid=,ppid=,args="], 10)).output
+    children: dict[str, list[str]] = {}
+    args: dict[str, str] = {}
+    roots = []
+    for line in table.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, ppid, cmd = parts
+        children.setdefault(ppid, []).append(pid)
+        args[pid] = cmd
+        if cmd.startswith(f"timeout --kill-after=5 {timeout} bash -c"):
+            roots.append(pid)
+    leaves, todo = [], list(roots)
+    while todo:
+        pid = todo.pop()
+        if pid in children:
+            todo.extend(children[pid])
+        elif pid not in roots:
+            leaves.append(" ".join(args[pid].split())[:80])
+    return list(dict.fromkeys(leaves))[:3]
+
+
 @tool()
 async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str:
     """Run a bash command in this chat's own Debian 13 sandbox: do the user's task here (set up, install, run, check) and test the code you give. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
     conversation, user = caller(ctx)
     timeout = max(1, min(timeout, MAX_TIMEOUT))
     box, note = await sandboxes.get(conversation, user)
-    result = await execute(box, ["timeout", "--kill-after=5", str(timeout), "bash", "-c", command], timeout)
+    watch = asyncio.create_task(still_running(box, timeout))
+    try:
+        result = await execute(box, ["timeout", "--kill-after=5", str(timeout), "bash", "-c", command], timeout)
+    finally:
+        watch.cancel()
+    try:
+        running = watch.result() if watch.done() else []
+    except (asyncio.CancelledError, aiodocker.DockerError):
+        running = []
     if result.hung:
         status = f"[stopped waiting after {timeout}s: something still holds the output open; redirect background jobs: > log 2>&1 &]"
     elif result.exit_code in (124, 137) and result.seconds >= timeout:
-        # Most often a program reading input that never comes (gemma4-e2b ran
-        # its own number-guessing game bare, then said it awaited a guess).
-        status = f"[timed out after {timeout}s and was stopped. Reads input? There is no keyboard: pipe it in (`printf '5\\n' | CMD`). Long jobs: nohup CMD > log 2>&1 &]"
+        # A program reading input that never comes (gemma4-e2b ran its own
+        # number-guessing game bare, then said it awaited a guess), or one
+        # that never ends by itself: its CSV monitor called `vmstat 1`, which
+        # samples until stopped, and it blamed the sandbox. Naming what was
+        # still running points at the cause.
+        where = f", still running {', '.join(f'`{a}`' for a in running)}" if running else ""
+        status = (
+            f"[timed out after {timeout}s and was stopped{where}. A program that waits for input or never"
+            " ends by itself needs its input piped in (`printf '5\\n' | CMD`) or a count or limit"
+            " (`vmstat 1 5`, `ping -c 3`, `top -b -n 1`). Long jobs: nohup CMD > log 2>&1 &]"
+        )
     elif result.exit_code == 137:
         status = f"[killed (exit 137), most likely by the {human(MEMORY_SWAP)} memory limit, {result.seconds:.1f}s]"
     elif result.exit_code == 0 and result.errors:
@@ -577,9 +622,14 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s: it failed. Fix the cause and run it again, or say why it can't be done.]"
     else:
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s]"
+    failed = result.exit_code not in (0, None) or result.errors
+    # gemma4-e2b ran a failing `git commit` again unchanged ("Author identity
+    # unknown" both times), then reported the failure.
+    if failed and box.failed == (command, result.exit_code):
+        status += "\n[That is the same command that failed the same way just before: running it again won't change it. Do what the error asks first, then run it.]"
+    box.failed = (command, result.exit_code) if failed else None
     alternatives = "" if result.hung else await apt_alternatives(box, result.output)
     limits = await limits_note(box, command)
-    failed = result.exit_code not in (0, None) or result.errors
     folders = await missing_dirs(box, command) if failed and not result.hung else ""
     refused = (
         "[Connection refused on the sandbox's own address: nothing listens on that port. Connections"
