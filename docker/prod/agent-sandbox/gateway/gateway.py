@@ -628,6 +628,14 @@ def exec_format_note(output: str) -> str:
     return f"[{path} isn't a program for this system; run it with: {_RUN_WITH[ext].format(target)}]"
 
 
+# `go build` or `go run .` outside a module: gemma4-e2b got "go.mod file not
+# found", never reached its compile error, and gave code that didn't build.
+GO_MOD_NOTE = (
+    "[No go.mod here: build the file itself (go build -o NAME FILE.go, go run FILE.go),"
+    " or make a module first (go mod init NAME).]"
+)
+
+
 # Root in a container without kernel privileges: gemma4-e2b took dockerd's
 # failure for a PATH problem, and keeps retrying firewall rules.
 _NO_PRIVILEGE = re.compile(r"you must be root|Operation not permitted|Read-only file system|permission denied on key")
@@ -956,8 +964,9 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         if _REFUSED.search(result.output) else ""
     )
     exec_format = exec_format_note(result.output) if failed else ""
+    go_mod = GO_MOD_NOTE if failed and "go.mod file not found" in result.output else ""
     no_input = NO_INPUT_NOTE if failed and _NO_INPUT.search(result.output) and not re.search(r"[|<]", command) else ""
-    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, sources, exec_format, no_tty, no_input, privilege, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, sources, exec_format, go_mod, no_tty, no_input, privilege, limits, refused) if part)
 
 
 # --- run_code --------------------------------------------------------------
