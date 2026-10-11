@@ -50,14 +50,20 @@ chat (a follow-up citing the last turn's article). Otherwise it is dropped:
 citing rule, or "[Calculation result](https://example.com/...)" after a
 date calculation.
 
-Code the model tested with the sandbox's run_code reaches the answer: a
-reply with no code block, after run_code ran a program in this turn, ends
-with that program (the last one that passed its expected output, else the
-last that ran), before any Sources line. gemma4-e2b tested its Lua
-palindrome check (5/5) and answered "code shown in the previous step",
-which the user never sees; it answered nothing at all after testing its C
-Kadane; and it ended a Haskell chat with an untested rewrite that didn't
-compile.
+Code the model wrote in the sandbox reaches the answer: a reply with no
+code block, after run_code or write_file wrote a program in this turn, ends
+with that program, before any Sources line: the last one that passed its
+expected output, else the last that ran, else the last written (labelled as
+not passing, or with its file name). gemma4-e2b tested its Lua palindrome
+check (5/5) and answered "code shown in the previous step", which the user
+never sees; it answered nothing at all after testing its C Kadane; and it
+ended a Haskell chat with an untested rewrite that didn't compile. The user
+wants to see the code whenever the model writes some.
+
+Files the sandbox shared in this turn (its "Download link for the user:"
+lines, from write_file, run_code and share_file) end the reply as a
+"Download:" line, the latest copy of each file name (for the program shown,
+that version's copy), unless the reply already shows that link.
 
 Text streams as before; only a line that might start a Sources block waits
 for its newline, and a bracket that might start a citation for its end.
@@ -273,11 +279,13 @@ Source = tuple[str, str, str]
 class Offered(list):
   """Sources per tool result; .asked is the user's message and the queries,
   .known every URL any tool result in the chat gave, .tested the program
-  run_code ran in this turn ((language, code), or None)."""
+  the sandbox wrote in this turn ((language, code, label), or None), .files
+  the downloads it shared (name -> link)."""
 
   asked = ""
   known: frozenset[str] = frozenset()
-  tested: tuple[str, str] | None = None
+  tested: tuple[str, str, str] | None = None
+  files: dict[str, str] = {}
 
 
 # run_code's languages, as code-block labels.
@@ -287,22 +295,41 @@ _FENCE_LANG = {
     "kt": "kotlin", "c#": "csharp", "cs": "csharp", "rb": "ruby", "hs": "haskell", "sh": "bash", "shell": "bash",
 }
 _FENCED = re.compile(r"\A\s*```[\w+#-]*[^\n]*\n(.*?)\n?```\s*\Z", re.S)
+# write_file's source files, by extension, as code-block labels.
+_CODE_EXT = {
+    "py": "python", "js": "javascript", "mjs": "javascript", "ts": "typescript", "c": "c", "h": "c",
+    "cpp": "cpp", "cc": "cpp", "hpp": "cpp", "java": "java", "go": "go", "rs": "rust", "rb": "ruby",
+    "php": "php", "sh": "bash", "pl": "perl", "kt": "kotlin", "cs": "csharp", "lua": "lua",
+    "hs": "haskell", "swift": "swift", "scala": "scala", "sql": "sql", "r": "r",
+}
+# The gateway's link line (agent-sandbox gateway.py DOWNLOAD).
+_DOWNLOAD = re.compile(r"^Download link for the user: \[([^\]\n]+)\]\((\S+?)\)$", re.M)
 
 
-def _tested(name: str, args: dict[str, Any], output: str) -> tuple[int, tuple[str, str]] | None:
-  """(2 passed, 1 ran; the program) for a run_code result, else None."""
-  if "run_code" not in name or not isinstance(args.get("code"), str):
-    return None
-  if "\nPASS: " in output:
-    rank = 2
-  elif re.search(r"^Ran `.*`: exit 0,", output, re.M):
-    rank = 1
+def _tested(name: str, args: dict[str, Any], output: str) -> tuple[int, tuple[str, str, str]] | None:
+  """The program a sandbox call wrote, ranked 3 passed its expected output,
+  2 ran without error, 1 only written (write_file, or a run that failed):
+  (rank, (language, code, label)), else None."""
+  if "run_code" in name and isinstance(args.get("code"), str) and "Saved " in output:
+    language = str(args.get("language") or "").strip().lower()
+    language, code = _FENCE_LANG.get(language, language), args["code"]
+    fenced = _FENCED.match(code)
+    code = fenced.group(1) if fenced else code
+    if "\nPASS: " in output:
+      rank, label = 3, ""
+    elif re.search(r"^Ran `.*`: exit 0,", output, re.M) and not re.search(r"^FAIL: ", output, re.M):
+      rank, label = 2, ""
+    else:
+      rank, label = 1, "The last version tested, which did not pass:"
+  elif "write_file" in name and isinstance(args.get("content"), str) and output.lstrip().startswith(("Wrote ", "[")):
+    file = str(args.get("path") or "").rsplit("/", 1)[-1]
+    language = _CODE_EXT.get(file.rsplit(".", 1)[-1].lower() if "." in file else "")
+    if not language:
+      return None
+    rank, label, code = 1, f"`{file}`:", args["content"]
   else:
     return None
-  language = str(args.get("language") or "").strip().lower()
-  code = args["code"]
-  fenced = _FENCED.match(code)
-  return rank, (_FENCE_LANG.get(language, language), (fenced.group(1) if fenced else code).strip("\n"))
+  return rank, (language, code.strip("\n"), label)
 
 
 def _wikipedia(output: str) -> list[Source]:
@@ -358,7 +385,9 @@ def collect(body: dict[str, Any]) -> Offered | None:
       start = i + 1
   calls: dict[str, tuple[str, dict[str, Any]]] = {}
   groups = Offered()
+  groups.files = {}
   best = 0
+  tested_link: tuple[str, str] | None = None
   # Links in tool results, and pages the model read (web_url_read's url).
   groups.known = frozenset(
       url for msg in messages if isinstance(msg, dict)
@@ -385,9 +414,14 @@ def collect(body: dict[str, Any]) -> Offered | None:
       continue
     name, args = calls.get(msg.get("tool_call_id"), ("", {}))
     output = _text(msg.get("content"))
+    links = _DOWNLOAD.findall(output)
+    for file, url in links:
+      groups.files.pop(file, None)
+      groups.files[file] = url
     ran = _tested(name, args, output)
     if ran and ran[0] >= best:
       best, groups.tested = ran[0], ran[1]
+      tested_link = links[0] if links else None
     if "wikipedia_search" in name:
       found = _wikipedia(output)
     elif "searxng_web_search" in name:
@@ -398,6 +432,8 @@ def collect(body: dict[str, Any]) -> Offered | None:
       continue
     if found:
       groups.append(found)
+  if tested_link:
+    groups.files[tested_link[0]] = tested_link[1]
   groups.asked = "\n".join(asked)
   return groups
 
@@ -452,6 +488,8 @@ class Filter:
     self._asked = getattr(sources, "asked", "")
     self._known = getattr(sources, "known", frozenset())
     self._tested = getattr(sources, "tested", None)
+    self._files = getattr(sources, "files", {})
+    self._shown = ""         # everything streamed
     self._partial = ""       # current line, held while it may be a header
     self._passing = False    # current line already (partly) streamed
     self._hold = ""          # end of a streaming line that may start "Sources:"
@@ -462,6 +500,7 @@ class Filter:
 
   def _emit(self, parts: list[str]) -> str:
     text = "".join(parts)
+    self._shown += text
     self._tail = (self._tail + text)[-2:]
     self._wrote = self._wrote or bool(text.strip())
     return text
@@ -528,15 +567,22 @@ class Filter:
     # A line opening with a link may be a line of links: held to its end.
     return "sources".startswith(word) or word.startswith("source") or word.startswith("[")
 
+  def _sep(self) -> str:
+    return "" if not self._wrote or self._tail.endswith("\n\n") else "\n" if self._tail.endswith("\n") else "\n\n"
+
   def _code(self, text: str) -> str:
-    """`text` (already streamed through _emit), then the program run_code
-    tested, when the reply has no code block of its own."""
-    if not self._tested or "```" in self._seen:
-      return text
-    language, code = self._tested
-    sep = "" if not self._wrote or self._tail.endswith("\n\n") else "\n" if self._tail.endswith("\n") else "\n\n"
-    _log(f"appended the {language} program run_code tested ({len(code)} chars)")
-    return text + self._emit([f"{sep}```{language}\n{code}\n```\n"])
+    """`text` (already streamed through _emit), then the program the
+    sandbox wrote, when the reply has no code block of its own, and links
+    to the files it shared that the reply doesn't show."""
+    if self._tested and "```" not in self._seen and len(self._tested[1]) <= 20000:
+      language, code, label = self._tested
+      _log(f"appended the {language} program the sandbox wrote ({len(code)} chars)")
+      text += self._emit([self._sep() + (label + "\n\n" if label else "") + f"```{language}\n{code}\n```\n"])
+    files = [f"[{name}]({url})" for name, url in self._files.items() if url not in self._shown]
+    if files:
+      _log(f"appended {len(files)} download link(s)")
+      text += self._emit([self._sep() + "Download: " + ", ".join(files) + "\n"])
+    return text
 
   def finish(self, has_tool_calls: bool) -> str:
     """Returns the rest of the reply, ending with the Sources line."""
