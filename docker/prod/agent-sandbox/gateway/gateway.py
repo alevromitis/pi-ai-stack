@@ -557,6 +557,21 @@ NO_TTY_NOTE = (
 )
 
 
+# A run command's stdin is /dev/null: a program that reads its input meets
+# end of input at once, and each language says so its own way (Python's
+# EOFError, Java's Scanner, Rust's unwrap on "", Kotlin's readLine()!!...).
+# Coding tasks give input on stdin, and a test run without it fails.
+_NO_INPUT = re.compile(
+    r"EOFError|NoSuchElementException|ReadAfterEOFException|readLine\(\)[^\n]*is null|Cannot parse null string"
+    r"|kind: Empty|cannot parse integer from empty string|<stdin>: \w+: end of file|Unexpectedly found nil while unwrapping"
+    r"|ArgumentNullException|for nil(?::NilClass)?\b|on a nil value"
+)
+NO_INPUT_NOTE = (
+    "[Its input was empty: a command here gets nothing on stdin, so give a program its input with a pipe"
+    " or a file: printf '3\\n1 2 3\\n' | python3 sol.py, or python3 sol.py < input.txt]"
+)
+
+
 # Root in a container without kernel privileges: gemma4-e2b took dockerd's
 # failure for a PATH problem, and keeps retrying firewall rules.
 _NO_PRIVILEGE = re.compile(r"you must be root|Operation not permitted|Read-only file system|permission denied on key")
@@ -836,7 +851,8 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
-    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, no_tty, privilege, limits, refused) if part)
+    no_input = NO_INPUT_NOTE if failed and _NO_INPUT.search(result.output) and not re.search(r"[|<]", command) else ""
+    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, no_tty, no_input, privilege, limits, refused) if part)
 
 
 @tool()
