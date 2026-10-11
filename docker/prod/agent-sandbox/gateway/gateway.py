@@ -1074,6 +1074,7 @@ async def run_code(language: str, code: str, ctx: Context, input: str = "", expe
     stdin = input if not input or input.endswith("\n") else input + "\n"
     save = 'printf %s "$2" > "$1" && printf %s "$3" > /tmp/run_code.in'
     saved = await execute(box, ["sh", "-c", save, "save", path, code, stdin], 30)
+    box.failed = None
     if saved.exit_code != 0:
         raise ToolError(f"Couldn't save {path}: {saved.output or saved.exit_code}")
     lines.append(f"Saved {path}.")
@@ -1137,6 +1138,10 @@ async def write_file(path: str, content: str, ctx: Context) -> str:
     result = await execute(box, ["sh", "-c", script, "write_file", path, content], 30)
     if result.exit_code != 0:
         raise ToolError(f"Couldn't write {path}: {result.output or f'exit {result.exit_code}'}")
+    # The next run of the same command runs what was just written: not the
+    # unchanged repeat that the "same command failed" note is about
+    # (gemma4-e2b fixed coin_change.rs three times and got that note each time).
+    box.failed = None
     checked = await shellcheck(box, result.output) if is_shell(path, content) else ""
     return "\n".join(part for part in (note, f"Wrote {human(size)} to {result.output}.", checked) if part)
 
