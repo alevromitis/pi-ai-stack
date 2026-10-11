@@ -909,7 +909,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         if _HERE.search(command):
             status = status[:-1] + f"; . is {WORKDIR}, this chat's work folder, not the whole system]"
     if result.exit_code == 0 and not result.errors:
-        status += ("\n" + note) if (note := compiled_only(command)) else ""
+        status += ("\n" + unrun) if (unrun := compiled_only(command)) else ""
     failed = result.exit_code not in (0, None) or result.errors
     # gemma4-e2b ran a failing `git commit` again unchanged ("Author identity
     # unknown" both times), then reported the failure.
