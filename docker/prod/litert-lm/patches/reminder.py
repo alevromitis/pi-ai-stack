@@ -16,7 +16,7 @@ paragraph (LibreChat's memory agent, titles) pass through untouched. Every
 user message in the history gets the same copy, so the prefix cache (which
 compares whole histories) still matches.
 
-Runs after citations.collect and presearch, which read the user's own words.
+Runs after citations.collect, which reads the user's own words.
 
 When the request offers the agent-sandbox tools (LibreChat names them
 "..._mcp_sandbox"), the copy ends with one sentence for them: asked to "set

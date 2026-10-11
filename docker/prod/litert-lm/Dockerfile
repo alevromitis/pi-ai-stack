@@ -69,8 +69,7 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 # unless the user asked to remember or forget something.
 # patches/citations.py ends answers built on search results with a Sources
 # line the server writes from those results, since the model cites
-# unpredictably. patches/presearch.py answers a plain factual question with
-# a search tool call, without the engine, so the model never skips the search.
+# unpredictably.
 # patches/reminder.py repeats the system prompt's "Before answering:"
 # paragraph in every user message: the model follows the newest turn.
 # patches/length.py reports a reply cut off at max_tokens as "length", with a
@@ -79,12 +78,11 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 COPY patches/ /tmp/patches/
 RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_handler.py')")" \
     && cp /tmp/patches/prefix_cache.py /tmp/patches/memory_gate.py \
-          /tmp/patches/citations.py /tmp/patches/presearch.py \
-          /tmp/patches/reminder.py /tmp/patches/length.py "$d/" \
+          /tmp/patches/citations.py /tmp/patches/reminder.py \
+          /tmp/patches/length.py "$d/" \
     && python3 /tmp/patches/apply_prefix_cache.py "$d" \
     && python3 /tmp/patches/apply_reasoning.py "$d" \
     && python3 /tmp/patches/apply_memory_gate.py "$d" \
-    && python3 /tmp/patches/apply_presearch.py "$d" \
     && python3 /tmp/patches/apply_reminder.py "$d" \
     && python3 /tmp/patches/apply_citations.py "$d" \
     && python3 /tmp/patches/apply_length.py "$d" \

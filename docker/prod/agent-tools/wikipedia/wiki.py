@@ -314,9 +314,9 @@ class Wiki:
         """The query with the names it writes in lowercase capitalised, so
         they are looked up by name ("population of nigeria" -> "population
         of Nigeria", "how tall is mount fuji" -> "how tall is Mount Fuji").
-        Real users, and the pre-search that sends their words, write
-        lowercase; the model searched "population of nigeria" three times,
-        got "Islam in Nigeria" and "Ido, Nigeria", and gave up. Runs of
+        Real users write lowercase, and so does the model: it searched
+        "population of nigeria" three times, got "Islam in Nigeria" and
+        "Ido, Nigeria", and gave up. Runs of
         words first, longest first, then single words; see _is_name."""
         tokens = query.split()
         bare = [re.sub(r"^\W+|\W+$", "", t) for t in tokens]
@@ -449,7 +449,7 @@ def trim(text: str, limit: int, query: str = "") -> str:
 # pronouns, question words and verbs of the languages most often asked in.
 # Left out: words that are English too ("son", "war", "dove", "come") and
 # lone name particles ("Los Angeles", "da Vinci", "von der Leyen"), which
-# is why it takes two. (Same list as litert-lm's patches/presearch.py.)
+# is why it takes two. (Same list as litert-lm's patches/citations.py.)
 FOREIGN = frozenset("""
 el los las del una unos unas como cual cuál cuáles donde dónde qué quién quiénes cuándo cuánto cuántos
 cuántas más por para pero también sobre entre hasta desde está están fue son y
