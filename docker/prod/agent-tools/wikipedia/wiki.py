@@ -353,7 +353,13 @@ class Wiki:
         except KeyError:
             return False
         html = bytes(entry.get_item().content).decode("utf-8", "replace")
-        if _disambiguation(html):
+        # _disambiguation reads the page's first 3000 characters, mostly its
+        # <head> here: "Change, Changed or Changing may refer to" (at 5089)
+        # went unseen and "changed" was taken for a name. This checks the
+        # article text's opening. (Doing so in _disambiguation itself made
+        # "Wimbledon" resolve to Wimbledon, London, and lost the 2025 final.)
+        start = html.find("mw-parser-output")
+        if _disambiguation(html) or _disambiguation(html[max(start, 0):]):
             return False
         parts = sections(html) if html else []
         lead = " ".join([p for p in parts[0].paras if not p.startswith("Infobox:")][:2]) if parts else ""
