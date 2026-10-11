@@ -133,6 +133,12 @@ RUN mkdir -p /etc/sandbox && printf '%s\n' \
         '[ -r ~/.bashrc ] && . ~/.bashrc' \
         > /etc/sandbox/bashenv
 
+# For the gateway's check of shell scripts the model writes: gemma4-e2b's
+# duplicate finder filled an array inside `find | while read`, a subshell,
+# and reported the empty result (0 groups of 53).
+RUN apt-get update && apt-get install -y --no-install-recommends shellcheck \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]

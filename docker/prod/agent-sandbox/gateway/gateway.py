@@ -518,6 +518,41 @@ NO_PRIVILEGE_NOTE = (
 )
 
 
+# ShellCheck on the model's shell code: its errors and warnings, and the
+# notes that a variable set in a pipeline's subshell is lost (gemma4-e2b's
+# duplicate finder reported 0 groups of 53 that way). Not the style and
+# quoting advice, nor warnings that don't change what runs.
+# $1: a file to check (bash without a shebang), or "-" for the text in $2
+# (a run command, as bash).
+_SHELLCHECK = (
+    'cd /work || exit\n'
+    'if [ "$1" = - ]; then f=$(mktemp); printf %s "$2" > "$f"; set -- -s bash "$f"\n'
+    'elif [ "$(head -c 2 "$1")" = "#!" ]; then set -- "$1"; else set -- -s bash "$1"; fi\n'
+    'shellcheck -f gcc -S info "$@" 2>/dev/null | head -n 40; [ -z "$f" ] || rm -f "$f"'
+)
+_SC_LINE = re.compile(r"^(?:[^:]*):(\d+):\d+: (error|warning|note): (.*) \[(SC\d+)\]$")
+_SC_NOTES = {"SC2030", "SC2031"}
+_SC_SKIP = {"SC2034", "SC2148", "SC2155", "SC2164"}
+
+
+async def shellcheck(box: Sandbox, path: str = "-", text: str = "") -> str:
+    found = (await execute(box, ["bash", "-c", _SHELLCHECK, "shellcheck", path, text], 20)).output
+    problems = []
+    for line in found.splitlines():
+        m = _SC_LINE.match(line)
+        if m and m[4] not in _SC_SKIP and (m[2] != "note" or m[4] in _SC_NOTES):
+            problems.append(f"line {m[1]}: {m[3]} ({m[4]})")
+    if not problems:
+        return ""
+    shown = "\n".join(dict.fromkeys(problems[:6]))
+    return f"[ShellCheck finds problems; fix them, then run it:\n{shown}]"
+
+
+def is_shell(path: str, content: str) -> bool:
+    first = content.split("\n", 1)[0]
+    return path.endswith((".sh", ".bash")) or bool(re.match(r"#!\s*\S*(?:/|env\s+)(?:ba|da)?sh\b", first))
+
+
 # --- MCP ---------------------------------------------------------------------
 
 _CONVERSATION = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -677,6 +712,9 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     box.failed = (command, result.exit_code) if failed else None
     alternatives = "" if result.hung else await apt_alternatives(box, result.output)
     commands = "" if result.hung else await missing_commands(box, result.output)
+    # Its `[[ a =~ x || [[ b =~ y ]]` failed three times on bash's terse
+    # "conditional binary operator expected".
+    syntax = await shellcheck(box, text=command) if result.exit_code == 2 and "syntax error" in result.output else ""
     privilege = NO_PRIVILEGE_NOTE if _NO_PRIVILEGE.search(result.output) else ""
     limits = await limits_note(box, command)
     folders = await missing_dirs(box, command) if failed and not result.hung else ""
@@ -685,7 +723,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
-    return "\n".join(part for part in (note, result.output, status, alternatives, commands, folders, privilege, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, syntax, alternatives, commands, folders, privilege, limits, refused) if part)
 
 
 @tool()
@@ -700,7 +738,8 @@ async def write_file(path: str, content: str, ctx: Context) -> str:
     result = await execute(box, ["sh", "-c", script, "write_file", path, content], 30)
     if result.exit_code != 0:
         raise ToolError(f"Couldn't write {path}: {result.output or f'exit {result.exit_code}'}")
-    return "\n".join(part for part in (note, f"Wrote {human(size)} to {result.output}.") if part)
+    checked = await shellcheck(box, result.output) if is_shell(path, content) else ""
+    return "\n".join(part for part in (note, f"Wrote {human(size)} to {result.output}.", checked) if part)
 
 
 @tool(destructive=True)
