@@ -150,6 +150,46 @@ RUN mkdir -p /etc/sandbox && printf '%s\n' \
 RUN apt-get update && apt-get install -y --no-install-recommends shellcheck \
     && rm -rf /var/lib/apt/lists/*
 
+# The languages of coding tasks, ready to run: a JDK, Go and Rust each take
+# minutes to install on the Pi (and 256 MiB of RAM), time a coding task
+# shouldn't spend before its first test. python3-sortedcontainers: LeetCode's
+# Python has it, so solutions import it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cargo \
+        default-jdk-headless \
+        golang-go \
+        php-cli \
+        python3-sortedcontainers \
+        ruby \
+        rustc \
+    && rm -rf /var/lib/apt/lists/*
+
+# TypeScript: tsc, and tsx and ts-node to run a .ts file. TypeScript 5:
+# ts-node fails on 7 (no JavaScript API), and 6 and 7 leave out @types/node
+# (tsc: "Cannot find name 'require'"). /node_modules is npm's global folder,
+# so Node and tsc find what `npm i -g` installed from any folder
+# (require('lodash') after npm i -g lodash; @types/node for process).
+# Without a tsconfig.json, ts-node picks Node 16's module setting, and Node
+# 20 then fails on the file: "Unknown file extension .ts". CommonJS runs it.
+ENV TS_NODE_COMPILER_OPTIONS={\"module\":\"commonjs\"}
+RUN npm install -g typescript@5 tsx ts-node @types/node \
+    && ln -s "$(npm root -g)" /node_modules \
+    && npm cache clean --force
+
+# Go builds its standard library on first use: a minute for the first
+# `go run` on one core. Build the packages solutions import now. trim.txt
+# says the cache was just trimmed (in 2100), or the first go command in an
+# image older than 5 days would delete it all as unused.
+# GOTOOLCHAIN=local: a go.mod asking for a newer Go fails instead of downloading it.
+ENV GOTOOLCHAIN=local
+RUN mkdir -p /tmp/warm && cd /tmp/warm \
+    && printf '%s\n' 'package main' 'import (' '_ "bufio"' '_ "container/heap"' '_ "container/list"' \
+        '_ "errors"' '_ "fmt"' '_ "math"' '_ "math/bits"' '_ "math/rand"' '_ "os"' '_ "slices"' '_ "maps"' \
+        '_ "sort"' '_ "strconv"' '_ "strings"' '_ "sync"' '_ "time"' '_ "unicode"' '_ "encoding/json"' ')' \
+        'func main() {}' > main.go \
+    && go build -o /dev/null main.go \
+    && cd / && rm -rf /tmp/warm && echo 4102444800 > "$(go env GOCACHE)/trim.txt"
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]

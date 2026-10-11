@@ -751,7 +751,7 @@ RUN_ENV = {"BASH_ENV": "/etc/sandbox/bashenv"}
 
 @tool()
 async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str:
-    """Run a bash command in this chat's own Debian 13 sandbox: do the user's task here (set up, install, run, check) and test the code you give. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
+    """Run a bash command in this chat's own Debian 13 sandbox: do the user's task here (set up, install, run, check) and test the code you give. You are root in /work, with internet. Installed: python3, gcc/g++, java/javac 21, node 20 with tsc/tsx/ts-node, go, rustc/cargo, ruby, php. Install more with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
     conversation, user = caller(ctx)
     timeout = max(1, min(timeout, MAX_TIMEOUT))
     box, note = await sandboxes.get(conversation, user)
