@@ -508,6 +508,16 @@ async def missing_commands(box: Sandbox, output: str) -> str:
     return "\n".join(notes)
 
 
+# Root in a container without kernel privileges: gemma4-e2b took dockerd's
+# failure for a PATH problem, and keeps retrying firewall rules.
+_NO_PRIVILEGE = re.compile(r"you must be root|Operation not permitted|Read-only file system|permission denied on key")
+NO_PRIVILEGE_NOTE = (
+    "[You are root, but this sandbox is a container without kernel privileges: firewalls (iptables, ufw,"
+    " nft), Docker, mounts, kernel modules and sysctl don't work here. Do the rest, say what can't be"
+    " done here, and give the commands for a real server.]"
+)
+
+
 # --- MCP ---------------------------------------------------------------------
 
 _CONVERSATION = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -659,6 +669,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     box.failed = (command, result.exit_code) if failed else None
     alternatives = "" if result.hung else await apt_alternatives(box, result.output)
     commands = "" if result.hung else await missing_commands(box, result.output)
+    privilege = NO_PRIVILEGE_NOTE if _NO_PRIVILEGE.search(result.output) else ""
     limits = await limits_note(box, command)
     folders = await missing_dirs(box, command) if failed and not result.hung else ""
     refused = (
@@ -666,7 +677,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
-    return "\n".join(part for part in (note, result.output, status, alternatives, commands, folders, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, alternatives, commands, folders, privilege, limits, refused) if part)
 
 
 @tool()
