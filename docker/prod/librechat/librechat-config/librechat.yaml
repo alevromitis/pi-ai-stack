@@ -69,6 +69,14 @@ endpoints:
       # queue the reply behind it.
       titleTiming: 'final'
       modelDisplayLabel: 'Qwen3.5 9B'
+      # Send Qwen's reasoning back with its own tool calls within a reply.
+      # Without it the chat template shows those steps with an empty
+      # <think>, and Qwen copies that: it ended 11 of 18 replays of a
+      # tool-using turn mid-thought with an empty reply, 0 of 6 with it
+      # (2026-10-11). Earlier turns' reasoning stays out
+      # (includeReasoningHistory), so history isn't spent on it.
+      customParams:
+        includeReasoningContent: true
       # Qwen's recommended thinking-mode sampling (model card): temperature
       # 1.0, top_p 0.95, top_k 20, min_p 0, presence_penalty 1.5. The
       # parameters panel has no top_k/min_p, so they go on every request;
