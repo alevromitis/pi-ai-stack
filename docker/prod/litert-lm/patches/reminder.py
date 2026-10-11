@@ -23,7 +23,9 @@ When the request offers the agent-sandbox tools (LibreChat names them
 up a cron job ... make sure it actually runs" or to change the timezone, the
 model wrote steps or said it couldn't change "the system I am running on",
 with the sandbox one call away; a line saying so in the run tool's own
-description didn't change that.
+description didn't change that. For code it names run_code: in LeetCode-style
+chats the model compiled without running, ran files it never wrote, and
+reported output it made up.
 
 Env:
   LITERT_REMINDER=0   disable (messages pass through untouched)
@@ -61,8 +63,9 @@ def _note(messages: list[Any]) -> str:
 
 
 _SANDBOX = (
-    "With the sandbox: do system tasks in it yourself and show the output,"
-    " and run code there before giving it."
+    "With the sandbox: do system tasks in it yourself and show the output;"
+    " test each program with run_code on the examples (input and expected"
+    " output) before giving it, and show the code and the output it really printed."
 )
 
 
