@@ -354,7 +354,7 @@ class Result:
     first_error: str = ""
 
 
-async def execute(box: Sandbox, argv: list[str], timeout: int) -> Result:
+async def execute(box: Sandbox, argv: list[str], timeout: int, env: dict[str, str] | None = None) -> Result:
     """Run argv in the sandbox; stdout and stderr interleaved as they arrive.
     Keeps the head and tail of long output, within OUTPUT_LIMIT."""
     head_cap = OUTPUT_LIMIT // 4
@@ -363,7 +363,7 @@ async def execute(box: Sandbox, argv: list[str], timeout: int) -> Result:
     total = 0
     stderr = bytearray()
     started = time.monotonic()
-    exe = await box.container.exec(cmd=argv, stdout=True, stderr=True, workdir=WORKDIR)
+    exe = await box.container.exec(cmd=argv, stdout=True, stderr=True, workdir=WORKDIR, environment=env)
 
     async def pump(stream: Any) -> None:
         nonlocal total
@@ -614,6 +614,10 @@ async def still_running(box: Sandbox, timeout: int) -> list[str]:
     return list(dict.fromkeys(leaves))[:3]
 
 
+# The image's bashenv: each command reads ~/.bashrc, with aliases on.
+RUN_ENV = {"BASH_ENV": "/etc/sandbox/bashenv"}
+
+
 @tool()
 async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str:
     """Run a bash command in this chat's own Debian 13 sandbox: do the user's task here (set up, install, run, check) and test the code you give. You are root in /work, with internet. Install with `apt-get update && apt-get install -y X`, `pip install X`, `npm i X`. Files and installs last for this chat only; read a file with `cat`. Long jobs: `nohup CMD > log 2>&1 &`. timeout: seconds, at most {max_timeout}."""
@@ -622,7 +626,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     box, note = await sandboxes.get(conversation, user)
     watch = asyncio.create_task(still_running(box, timeout))
     try:
-        result = await execute(box, ["timeout", "--kill-after=5", str(timeout), "bash", "-c", command], timeout)
+        result = await execute(box, ["timeout", "--kill-after=5", str(timeout), "bash", "-c", command], timeout, RUN_ENV)
     finally:
         watch.cancel()
     try:

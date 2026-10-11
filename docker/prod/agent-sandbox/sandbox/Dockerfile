@@ -121,6 +121,18 @@ RUN arch=$(dpkg --print-architecture) \
     | sort -u > /usr/share/sandbox-commands.tsv \
     && test -s /usr/share/sandbox-commands.tsv
 
+# Each `run` command is a fresh non-interactive bash, which skips ~/.bashrc
+# and aliases: gemma4-e2b added `alias ll='ls -la'` to /root/.bashrc,
+# sourced it, got "ll: command not found" and said the sandbox failed. The
+# gateway sets BASH_ENV to this file, so a command starts like a new
+# terminal; scripts it runs don't (BASH_ENV is unset for them).
+RUN mkdir -p /etc/sandbox && printf '%s\n' \
+        '# BASH_ENV of the gateway'"'"'s run commands: start like a new terminal.' \
+        'unset BASH_ENV' \
+        'shopt -s expand_aliases' \
+        '[ -r ~/.bashrc ] && . ~/.bashrc' \
+        > /etc/sandbox/bashenv
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]
