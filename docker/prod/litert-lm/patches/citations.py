@@ -77,6 +77,8 @@ _MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://(?:[^\s()]|\([^\s()]*\))+)\)")
 # A Sources block header: "Sources:", "**Sources:**", "### Sources", "Source:".
 _HEADER = re.compile(r"^[\s*_#>-]*sources?[\s*_]*(?::|\s*$)", re.IGNORECASE)
 _LEAD = re.compile(r"^[\s*_#>-]+")
+# A Markdown link to anything: "[Odyssey]([URL not provided])", "[curl](URL N/A)".
+_ANY_LINK = re.compile(r"\[[^\]\n]+\]\([^)\n]*\)")
 # A line of nothing but links: "[Cappella Sistina](URL), [Hendrick van den
 # Broeck](URL)" above the Sources line, citing a page about another chapel.
 _LINKS_ONLY = re.compile(r"^[\s*_>•-]*(?:\[[^\]\n]+\]\((?:[^\s()]|\([^\s()]*\))+\)[\s,;.*_|•-]*)+$")
@@ -463,10 +465,14 @@ class Filter:
     links = _URL.findall("".join(block or []))
     if not self._sources and (block is None or links and set(links) <= self._known):
       return self._emit([held, *(block or [])])
-    # Prose the model wrote after its Sources header is kept; link lines go.
+    # Prose the model wrote after its Sources header is kept; link lines go,
+    # and so do links to no URL and a second header: "**Sources:**" then
+    # "Sources: [curl command output](URL N/A - Result from sandbox
+    # execution)" came through as prose.
     rest = [
         line for line in "".join(block or []).splitlines()[1:]
         if _LEAD.sub("", line).strip() and not _URL.search(line)
+        and not _ANY_LINK.search(line) and not _HEADER.match(line)
     ]
     kept = "\n".join(rest)
     if kept and not (self._tail + held).endswith("\n"):
