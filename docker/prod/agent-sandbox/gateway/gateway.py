@@ -731,6 +731,9 @@ async def still_running(box: Sandbox, timeout: int) -> list[str]:
     return list(dict.fromkeys(leaves))[:3]
 
 
+# "." as a path argument: `find .`, `du -sh .`, `ls ./` (not `. ~/.bashrc`).
+_HERE = re.compile(r"(?<=[\w-]\s)\.(?:/|\s|$)", re.M)
+
 # The image's bashenv: each command reads ~/.bashrc, with aliases on.
 RUN_ENV = {"BASH_ENV": "/etc/sandbox/bashenv"}
 
@@ -786,6 +789,10 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         # gemma4-e2b's status check printed nothing (`read` got no newline
         # from curl -w) and it answered with the "UP" it expected.
         status = f"[exit {result.exit_code}, {result.seconds:.1f}s, no output]"
+        # Asked for every file over 10MB on the system, it ran `find .` in
+        # /work and said there were none.
+        if _HERE.search(command):
+            status = status[:-1] + f"; . is {WORKDIR}, this chat's work folder, not the whole system]"
     failed = result.exit_code not in (0, None) or result.errors
     # gemma4-e2b ran a failing `git commit` again unchanged ("Author identity
     # unknown" both times), then reported the failure.
