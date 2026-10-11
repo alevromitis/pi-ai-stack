@@ -70,20 +70,29 @@ RUN printf '%s\n' \
 
 # Commands copied from guides start with sudo, and gemma4-e2b adds it on its
 # own even when told it is root: run them as given (already root, no
-# password). Leading sudo options are dropped; env runs VAR=value too. And
-# `python` is python3, which the model also types.
+# password). Leading sudo options are dropped; env runs VAR=value too. But
+# `-u USER` runs it as that user (runuser): `sudo -u postgres psql` ran as
+# root, "role root does not exist". And `python` is python3, which the
+# model also types.
 RUN printf '%s\n' \
         '#!/bin/sh' \
-        '# Already root: run the command as given.' \
+        '# Already root: run the command as given; -u USER runs it as USER.' \
+        'user=; login=' \
         'while [ $# -gt 0 ]; do' \
         '  case "$1" in' \
-        '    -u|-g|-p|-C) shift 2 ;;' \
+        '    -u) user=$2; shift 2 ;;' \
+        '    --user=*) user=${1#--user=}; shift ;;' \
+        '    -i|--login) login=1; shift ;;' \
+        '    -g|-p|-C) shift 2 ;;' \
         '    --) shift; break ;;' \
         '    -*) shift ;;' \
         '    *) break ;;' \
         '  esac' \
         'done' \
-        'exec env "$@"' \
+        '[ $# -gt 0 ] || set -- bash' \
+        'case "$user" in ""|root|"#0") exec env "$@" ;; esac' \
+        '[ -z "$login" ] || cd "$(getent passwd "$user" | cut -d: -f6)" 2>/dev/null || true' \
+        'exec runuser -u "$user" -- env "$@"' \
         > /usr/local/bin/sudo \
     && chmod 755 /usr/local/bin/sudo \
     && ln -s /usr/bin/python3 /usr/local/bin/python
