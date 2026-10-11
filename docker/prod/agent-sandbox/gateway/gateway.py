@@ -613,6 +613,21 @@ NO_INPUT_NOTE = (
 )
 
 
+# A Mono .exe or a .jar run as a program: gemma4-e2b ran ./BinarySearch.exe,
+# got "Exec format error", and went back to dotnet, which isn't here.
+_EXEC_FORMAT = re.compile(r"(\S+\.(exe|jar|class|py|js)): cannot execute binary file: Exec format error")
+_RUN_WITH = {"exe": "mono {}", "jar": "java -jar {}", "class": "java {}", "py": "python3 {}", "js": "node {}"}
+
+
+def exec_format_note(output: str) -> str:
+    found = _EXEC_FORMAT.search(output)
+    if not found:
+        return ""
+    path, ext = found[1], found[2]
+    target = path.rsplit("/", 1)[-1][:-6] if ext == "class" else path
+    return f"[{path} isn't a program for this system; run it with: {_RUN_WITH[ext].format(target)}]"
+
+
 # Root in a container without kernel privileges: gemma4-e2b took dockerd's
 # failure for a PATH problem, and keeps retrying firewall rules.
 _NO_PRIVILEGE = re.compile(r"you must be root|Operation not permitted|Read-only file system|permission denied on key")
@@ -940,8 +955,9 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
+    exec_format = exec_format_note(result.output) if failed else ""
     no_input = NO_INPUT_NOTE if failed and _NO_INPUT.search(result.output) and not re.search(r"[|<]", command) else ""
-    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, sources, no_tty, no_input, privilege, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, sources, exec_format, no_tty, no_input, privilege, limits, refused) if part)
 
 
 @tool()
