@@ -50,6 +50,15 @@ chat (a follow-up citing the last turn's article). Otherwise it is dropped:
 citing rule, or "[Calculation result](https://example.com/...)" after a
 date calculation.
 
+Code the model tested with the sandbox's run_code reaches the answer: a
+reply with no code block, after run_code ran a program in this turn, ends
+with that program (the last one that passed its expected output, else the
+last that ran), before any Sources line. gemma4-e2b tested its Lua
+palindrome check (5/5) and answered "code shown in the previous step",
+which the user never sees; it answered nothing at all after testing its C
+Kadane; and it ended a Haskell chat with an untested rewrite that didn't
+compile.
+
 Text streams as before; only a line that might start a Sources block waits
 for its newline, and a bracket that might start a citation for its end.
 
@@ -263,10 +272,37 @@ Source = tuple[str, str, str]
 
 class Offered(list):
   """Sources per tool result; .asked is the user's message and the queries,
-  .known every URL any tool result in the chat gave."""
+  .known every URL any tool result in the chat gave, .tested the program
+  run_code ran in this turn ((language, code), or None)."""
 
   asked = ""
   known: frozenset[str] = frozenset()
+  tested: tuple[str, str] | None = None
+
+
+# run_code's languages, as code-block labels.
+_FENCE_LANG = {
+    "c++": "cpp", "cxx": "cpp", "cc": "cpp", "py": "python", "python3": "python", "js": "javascript",
+    "node": "javascript", "nodejs": "javascript", "ts": "typescript", "golang": "go", "rs": "rust",
+    "kt": "kotlin", "c#": "csharp", "cs": "csharp", "rb": "ruby", "hs": "haskell", "sh": "bash", "shell": "bash",
+}
+_FENCED = re.compile(r"\A\s*```[\w+#-]*[^\n]*\n(.*?)\n?```\s*\Z", re.S)
+
+
+def _tested(name: str, args: dict[str, Any], output: str) -> tuple[int, tuple[str, str]] | None:
+  """(2 passed, 1 ran; the program) for a run_code result, else None."""
+  if "run_code" not in name or not isinstance(args.get("code"), str):
+    return None
+  if "\nPASS: " in output:
+    rank = 2
+  elif re.search(r"^Ran `.*`: exit 0,", output, re.M):
+    rank = 1
+  else:
+    return None
+  language = str(args.get("language") or "").strip().lower()
+  code = args["code"]
+  fenced = _FENCED.match(code)
+  return rank, (_FENCE_LANG.get(language, language), (fenced.group(1) if fenced else code).strip("\n"))
 
 
 def _wikipedia(output: str) -> list[Source]:
@@ -322,6 +358,7 @@ def collect(body: dict[str, Any]) -> Offered | None:
       start = i + 1
   calls: dict[str, tuple[str, dict[str, Any]]] = {}
   groups = Offered()
+  best = 0
   # Links in tool results, and pages the model read (web_url_read's url).
   groups.known = frozenset(
       url for msg in messages if isinstance(msg, dict)
@@ -348,6 +385,9 @@ def collect(body: dict[str, Any]) -> Offered | None:
       continue
     name, args = calls.get(msg.get("tool_call_id"), ("", {}))
     output = _text(msg.get("content"))
+    ran = _tested(name, args, output)
+    if ran and ran[0] >= best:
+      best, groups.tested = ran[0], ran[1]
     if "wikipedia_search" in name:
       found = _wikipedia(output)
     elif "searxng_web_search" in name:
@@ -411,6 +451,7 @@ class Filter:
     self._sources = sources
     self._asked = getattr(sources, "asked", "")
     self._known = getattr(sources, "known", frozenset())
+    self._tested = getattr(sources, "tested", None)
     self._partial = ""       # current line, held while it may be a header
     self._passing = False    # current line already (partly) streamed
     self._hold = ""          # end of a streaming line that may start "Sources:"
@@ -487,6 +528,16 @@ class Filter:
     # A line opening with a link may be a line of links: held to its end.
     return "sources".startswith(word) or word.startswith("source") or word.startswith("[")
 
+  def _code(self, text: str) -> str:
+    """`text` (already streamed through _emit), then the program run_code
+    tested, when the reply has no code block of its own."""
+    if not self._tested or "```" in self._seen:
+      return text
+    language, code = self._tested
+    sep = "" if not self._wrote or self._tail.endswith("\n\n") else "\n" if self._tail.endswith("\n") else "\n\n"
+    _log(f"appended the {language} program run_code tested ({len(code)} chars)")
+    return text + self._emit([f"{sep}```{language}\n{code}\n```\n"])
+
   def finish(self, has_tool_calls: bool) -> str:
     """Returns the rest of the reply, ending with the Sources line."""
     held, block = _CITE.sub("", self._hold + self._partial), self._block
@@ -496,7 +547,7 @@ class Filter:
       return self._emit([held, *(block or [])])
     links = _URL.findall("".join(block or []))
     if not self._sources and (block is None or links and set(links) <= self._known):
-      return self._emit([held, *(block or [])])
+      return self._code(self._emit([held, *(block or [])]))
     # Prose the model wrote after its Sources header is kept; link lines go,
     # and so do links to no URL and a second header: "**Sources:**" then
     # "Sources: [curl command output](URL N/A - Result from sandbox
@@ -509,7 +560,7 @@ class Filter:
     kept = "\n".join(rest)
     if kept and not (self._tail + held).endswith("\n"):
       kept = "\n" + kept
-    text = self._emit([held + kept])
+    text = self._code(self._emit([held + kept]))
     if not self._sources:
       _log("dropped a Sources block with no known links")
       return text
