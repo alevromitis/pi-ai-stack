@@ -504,13 +504,24 @@ _WHICH_PACKAGE = (
 )
 
 
+# Toolchains Debian doesn't have, or has a different program under the name
+# (Debian's csc is Chicken Scheme's compiler), and what runs that language here.
+_INSTEAD = {
+    "dotnet": "C#: Debian has Mono instead: apt-get update && apt-get install -y mono-mcs, then mcs X.cs && mono X.exe",
+    "csc": "C#: Debian has Mono instead (its csc is a Scheme compiler): apt-get update && apt-get install -y mono-mcs, then mcs X.cs && mono X.exe",
+    "deno": "JavaScript and TypeScript run here with node X.js, tsx X.ts or ts-node X.ts",
+    "bun": "JavaScript and TypeScript run here with node X.js, tsx X.ts or ts-node X.ts",
+}
+
+
 async def missing_commands(box: Sandbox, output: str) -> str:
     names = list(dict.fromkeys(m[1] or m[2] for m in _NOT_FOUND.finditer(output)))[:3]
     names = [n for n in names if not n.endswith((".sh", ".py")) and not n.startswith(".")]
+    notes = [f"[{n} isn't installed. {_INSTEAD[n]}]" for n in names if n in _INSTEAD]
+    names = [n for n in names if n not in _INSTEAD]
     if not names:
-        return ""
+        return "\n".join(notes)
     found = (await execute(box, ["bash", "-c", _WHICH_PACKAGE, "which-package", *names], 15)).output
-    notes = []
     for line in found.splitlines():
         name, _, packages = line.partition("\t")
         if packages == "-":
