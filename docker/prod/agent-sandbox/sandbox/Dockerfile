@@ -111,6 +111,16 @@ RUN printf '%s\n' \
 # nproc and free report this container's cgroup limits, not the host's.
 COPY --chmod=755 bin/nproc bin/free /usr/local/bin/
 
+# Command -> Debian package, for the gateway's note after "command not
+# found": gemma4-e2b installed docker.io, which leaves the docker command to
+# docker-cli (a Recommends, skipped above), and took the missing command for
+# a PATH problem; logrotate it never installed at all.
+RUN arch=$(dpkg --print-architecture) \
+    && for c in all "$arch"; do curl -fsSL "https://deb.debian.org/debian/dists/trixie/main/Contents-$c.gz" | zcat; done \
+    | awk '$1 ~ /^(usr\/)?(s?bin|games)\/[^\/]+$/ { n = split($1, p, "/"); m = split($NF, q, ","); for (i = 1; i <= m; i++) { sub(/.*\//, "", q[i]); print p[n] "\t" q[i] } }' \
+    | sort -u > /usr/share/sandbox-commands.tsv \
+    && test -s /usr/share/sandbox-commands.tsv
+
 WORKDIR /work
 # PID 1 only keeps the container up; commands arrive by `docker exec`.
 CMD ["sleep", "infinity"]

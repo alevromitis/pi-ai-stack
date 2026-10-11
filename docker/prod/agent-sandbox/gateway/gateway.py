@@ -479,6 +479,35 @@ async def apt_alternatives(box: Sandbox, output: str) -> str:
     return "\n".join(notes)
 
 
+# "X: command not found" from bash or dash, and from env (the sudo shim):
+# which package has X (the image's index of Debian 13's commands).
+_NOT_FOUND = re.compile(r"(?m)(?:^|: )([\w.+-]+): (?:command )?not found$|^env: [‘'\x22]?([\w.+-]+)[’'\x22]?: No such file or directory$")
+_WHICH_PACKAGE = (
+    '[ -s /usr/share/sandbox-commands.tsv ] || exit 0\n'
+    'for c in "$@"; do command -v "$c" >/dev/null && continue\n'
+    '  p=$(awk -F "\t" -v c="$c" \'$1 == c { print $2 }\' /usr/share/sandbox-commands.tsv | head -n 4 | paste -sd " ")\n'
+    '  printf "%s\\t%s\\n" "$c" "${p:--}"; done'
+)
+
+
+async def missing_commands(box: Sandbox, output: str) -> str:
+    names = list(dict.fromkeys(m[1] or m[2] for m in _NOT_FOUND.finditer(output)))[:3]
+    names = [n for n in names if not n.endswith((".sh", ".py")) and not n.startswith(".")]
+    if not names:
+        return ""
+    found = (await execute(box, ["bash", "-c", _WHICH_PACKAGE, "which-package", *names], 15)).output
+    notes = []
+    for line in found.splitlines():
+        name, _, packages = line.partition("\t")
+        if packages == "-":
+            notes.append(f"[No Debian 13 package has a command called {name}: check the name, or install it another way (pip, npm, its own instructions).]")
+        elif packages:
+            first = packages.split()[0]
+            where = f"package {first}" if first == packages else f"packages {', '.join(packages.split())}"
+            notes.append(f"[{name} isn't installed. Debian 13 has it in {where}: apt-get update && apt-get install -y {first}]")
+    return "\n".join(notes)
+
+
 # --- MCP ---------------------------------------------------------------------
 
 _CONVERSATION = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -629,6 +658,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         status += "\n[That is the same command that failed the same way just before: running it again won't change it. Do what the error asks first, then run it.]"
     box.failed = (command, result.exit_code) if failed else None
     alternatives = "" if result.hung else await apt_alternatives(box, result.output)
+    commands = "" if result.hung else await missing_commands(box, result.output)
     limits = await limits_note(box, command)
     folders = await missing_dirs(box, command) if failed and not result.hung else ""
     refused = (
@@ -636,7 +666,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
-    return "\n".join(part for part in (note, result.output, status, alternatives, folders, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, alternatives, commands, folders, limits, refused) if part)
 
 
 @tool()
