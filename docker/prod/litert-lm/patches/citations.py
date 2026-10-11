@@ -205,6 +205,36 @@ def english_only(body: dict[str, Any]) -> None:
       _log("replaced the result of a search not in English")
 
 
+# wiki.py's notes that what it found is about other things than the query.
+_OFF_TOPIC = ("Note: these passages are from articles about other things", "no article found mentions it")
+_UNRELATED = (
+    "No results: the Wikipedia articles found are about other things. If this needs a search,"
+    " search with other words; if not, answer without one."
+)
+
+
+def unrelated_presearch(body: dict[str, Any]) -> None:
+  """Replaces, in place, the results of the server's own pre-search
+  (presearch.py, call ids ending "_presearch") when wiki.py says they are
+  about other things. The model never asked for them: given "Puppy Linux"
+  for "which installed packages take the most space?", gemma4-e2b said it
+  had no system to look at, with a sandbox at hand, and cited Puppy Linux.
+  Replaced, not removed: a request ending with the user's message again
+  would be pre-searched again."""
+  messages = body.get("messages")
+  if not isinstance(messages, list):
+    return
+  for msg in messages:
+    if (
+        isinstance(msg, dict) and msg.get("role") == "tool"
+        and str(msg.get("tool_call_id") or "").endswith("_presearch")
+        and msg.get("content") != _UNRELATED
+        and any(note in _text(msg.get("content")) for note in _OFF_TOPIC)
+    ):
+      msg["content"] = _UNRELATED
+      _log("replaced an off-topic pre-search result")
+
+
 def _text(content: Any) -> str:
   if isinstance(content, str):
     return content
@@ -278,9 +308,11 @@ def collect(body: dict[str, Any]) -> Offered | None:
 
   Empty when there are none (the reply is still filtered), None when
   disabled. Runs first on every request, so it also replaces the results
-  of searches not in English (english_only) for everything after it.
+  of searches not in English (english_only) and of off-topic pre-searches
+  (unrelated_presearch) for everything after it.
   """
   english_only(body)
+  unrelated_presearch(body)
   messages = body.get("messages")
   if not _ENABLED or not isinstance(messages, list):
     return None

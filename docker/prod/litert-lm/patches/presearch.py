@@ -30,6 +30,10 @@ text.
 The prefix cache (prefix_cache.py) accepts the server's tool-call turn, so
 the follow-up request still prefills only the new messages.
 
+When wiki.py says the results are about other things, citations.py's
+unrelated_presearch replaces them with a short "No results" before the
+model reads them (the model never asked for this search).
+
 Searches are in English (user, 2026-10-10), so a message in another
 language isn't pre-searched with its own words: the model searches in
 English itself (citations.english; citations.english_only replaces the
