@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import secrets
+import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -518,6 +519,57 @@ NO_PRIVILEGE_NOTE = (
 )
 
 
+# Commands that change modes, owners, users or groups print nothing:
+# gemma4-e2b ran `chmod g+w /srv/shared` to give group devs write access,
+# left the folder in group root, and said it was done. The result shows what
+# they changed, as it is now.
+_CHANGES = re.compile(
+    r"(?:^|[;&|(]\s*|\bsudo\s+)(chmod|chown|chgrp|setfacl|useradd|adduser|usermod|groupadd|addgroup|gpasswd)\b([^;&|\n]*)", re.M
+)
+_STATE = (
+    'for p; do case "$p" in u:*) id -- "${p#u:}" ;; g:*) getent group -- "${p#g:}" ;;'
+    ' *) [ -e "$p" ] && stat -c "%A %U:%G %n" -- "$p" ;; esac; done 2>/dev/null | head -n 10'
+)
+
+
+def changed(command: str) -> list[str]:
+    """What the command's mode, owner, user and group changes touched:
+    paths, "u:user" and "g:group"."""
+    things = []
+    for name, rest in _CHANGES.findall(command):
+        try:
+            words = shlex.split(rest)
+        except ValueError:
+            words = rest.split()
+        args, groups, take = [], [], False
+        for w in words:
+            if take:
+                groups += w.split(",")
+                take = False
+            elif w in ("-G", "-g", "--groups", "--gid", "--ingroup") or (w.startswith("-") and w.rstrip("G").endswith("a") and w.endswith("G")):
+                take = True
+            elif not w.startswith("-"):
+                args.append(w)
+        if name in ("chmod", "chown", "chgrp", "setfacl"):
+            things += args[1:]
+        elif name in ("groupadd", "addgroup") and args:
+            things.append("g:" + args[-1])
+        elif name == "gpasswd" and args:
+            things += ["g:" + args[-1], *("u:" + a for a in args[:-1])]
+        elif args:
+            things.append("u:" + args[-1])
+        things += ["g:" + g for g in groups if g]
+    return list(dict.fromkeys(things))[:8]
+
+
+async def state_note(box: Sandbox, command: str) -> str:
+    things = changed(command)
+    if not things:
+        return ""
+    now = (await execute(box, ["bash", "-c", _STATE, "state", *things], 10)).output
+    return f"[Now:\n{now}]" if now else ""
+
+
 # ShellCheck on the model's shell code: its errors and warnings, and the
 # notes that a variable set in a pipeline's subshell is lost (gemma4-e2b's
 # duplicate finder reported 0 groups of 53 that way). Not the style and
@@ -716,6 +768,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
     # "conditional binary operator expected".
     syntax = await shellcheck(box, text=command) if result.exit_code == 2 and "syntax error" in result.output else ""
     privilege = NO_PRIVILEGE_NOTE if _NO_PRIVILEGE.search(result.output) else ""
+    state = "" if result.hung else await state_note(box, command)
     limits = await limits_note(box, command)
     folders = await missing_dirs(box, command) if failed and not result.hung else ""
     refused = (
@@ -723,7 +776,7 @@ async def run(command: str, ctx: Context, timeout: int = DEFAULT_TIMEOUT) -> str
         " inside the sandbox work; check the server is running and on which port (ss -ltnp, its log).]"
         if _REFUSED.search(result.output) else ""
     )
-    return "\n".join(part for part in (note, result.output, status, syntax, alternatives, commands, folders, privilege, limits, refused) if part)
+    return "\n".join(part for part in (note, result.output, status, state, syntax, alternatives, commands, folders, privilege, limits, refused) if part)
 
 
 @tool()
