@@ -538,10 +538,14 @@ NO_TTY_NOTE = (
 # Root in a container without kernel privileges: gemma4-e2b took dockerd's
 # failure for a PATH problem, and keeps retrying firewall rules.
 _NO_PRIVILEGE = re.compile(r"you must be root|Operation not permitted|Read-only file system|permission denied on key")
+# It also took an init script's harmless "ulimit: error setting limit
+# (Operation not permitted)" for redis not starting: the note says only
+# those lines failed, and to check the rest.
 NO_PRIVILEGE_NOTE = (
-    "[You are root, but this sandbox is a container without kernel privileges: firewalls (iptables, ufw,"
-    " nft), Docker, mounts, kernel modules and sysctl don't work here. Do the rest, say what can't be"
-    " done here, and give the commands for a real server.]"
+    "[You are root, but this sandbox is a container without kernel privileges: the lines above that say"
+    " so failed for that reason (firewalls, Docker, mounts, kernel modules, sysctl and limits can't change"
+    " here). Check whether the rest worked; for what can't be done here, say so and give the commands for"
+    " a real server.]"
 )
 
 
