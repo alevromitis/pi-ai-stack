@@ -506,10 +506,18 @@ async def missing_sources(box: Sandbox, command: str) -> str:
     return f"[{'; '.join(notes)} (relative paths are in {WORKDIR}). Write the code to the file first (write_file), then compile and run it.]"
 
 
+# gemma4-e2b ran `apt-get install -y typescript ts-node` with both installed
+# (by npm) and read the packages like it as "no TypeScript here".
+_INSTALLED = 'command -v "$1" >/dev/null || [ -d "/usr/local/lib/node_modules/$1" ]'
+
+
 async def apt_alternatives(box: Sandbox, output: str) -> str:
     """For each package apt couldn't find, the ones it has like it."""
     notes = []
     for name in dict.fromkeys(m[1] or m[2] for m in _NO_PACKAGE.finditer(output)):
+        if (await execute(box, ["sh", "-c", _INSTALLED, "installed", name], 10)).exit_code == 0:
+            notes.append(f"[{name} is already installed here (not from apt): use it as it is.]")
+            continue
         words = [w for w in re.split(r"[-_.+:]", name) if w and not w.isdigit()] or [name]
         found = (await execute(box, ["bash", "-c", _APT_SEARCH, "apt-search", name, *words], 30)).output
         if found == "NOLISTS":
