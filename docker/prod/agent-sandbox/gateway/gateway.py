@@ -489,12 +489,17 @@ async def apt_alternatives(box: Sandbox, output: str) -> str:
 
 
 # "X: command not found" from bash or dash, and from env (the sudo shim):
-# which package has X (the image's index of Debian 13's commands).
+# which package has X (the image's index of Debian 13's commands). A
+# command no package has in PATH comes from another bin folder by an
+# alternative (java: openjdk-21-jre-headless) or is a versioned name (php:
+# php8.4 in php8.4-cli, lua: lua5.4).
 _NOT_FOUND = re.compile(r"(?m)(?:^|(?<!type)(?<!hash): )([\w.+-]+): (?:command )?not found$|^env: [‘'\x22]?([\w.+-]+)[’'\x22]?: No such file or directory$")
 _WHICH_PACKAGE = (
-    '[ -s /usr/share/sandbox-commands.tsv ] || exit 0\n'
+    'tsv=/usr/share/sandbox-commands.tsv; [ -s $tsv ] || exit 0\n'
     'for c in "$@"; do command -v "$c" >/dev/null && continue\n'
-    '  p=$(awk -F "\t" -v c="$c" \'$1 == c { print $2 }\' /usr/share/sandbox-commands.tsv | head -n 8 | paste -sd " ")\n'
+    '  p=$(awk -F "\t" -v c="$c" \'$1 == c { print $2 ":" $3 }\' $tsv | head -n 8 | paste -sd " ")\n'
+    '  [ -n "$p" ] || p=$(awk -F "\t" -v c="$c" \'$3 != 1 && index($1, c) == 1 && substr($1, length(c) + 1) ~ /^-?[0-9][0-9.]*$/ { print $2 ":0" }\' $tsv'
+    ' | sort -rVu | head -n 8 | paste -sd " ")\n'
     '  printf "%s\\t%s\\n" "$c" "${p:--}"; done'
 )
 
@@ -511,10 +516,16 @@ async def missing_commands(box: Sandbox, output: str) -> str:
         if packages == "-":
             notes.append(f"[No Debian 13 package has a command called {name}: check the name, or install it another way (pip, npm, its own instructions).]")
         elif packages:
-            names = packages.split()
-            # The package named like the command, else the shortest: cron for
-            # crontab (not bcron, first in the alphabet), docker-cli for docker.
-            first = min(names, key=lambda p: (not (name.startswith(p) or p.startswith(name)), len(p), p))
+            rank: dict[str, int] = {}
+            for entry in packages.split():
+                package, _, r = entry.rpartition(":")
+                rank[package] = min(rank.get(package, 9), int(r or 0))
+            names = list(rank)
+            # The package named like the command, else in PATH, else the
+            # shortest, else the first (the newest version): cron for crontab
+            # (not bcron), docker-cli for docker, swiftlang for swift (not
+            # python3-swiftclient's swift), lua5.4 for lua.
+            first = min(names, key=lambda p: (not (name.startswith(p) or p.startswith(name)), rank[p], len(p), names.index(p)))
             where = f"package {first}" if len(names) == 1 else f"packages {', '.join(names)}"
             notes.append(f"[{name} isn't installed. Debian 13 has it in {where}: apt-get update && apt-get install -y {first}]")
     return "\n".join(notes)

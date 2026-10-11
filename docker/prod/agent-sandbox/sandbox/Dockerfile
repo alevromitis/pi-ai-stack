@@ -123,10 +123,12 @@ COPY --chmod=755 bin/nproc bin/free /usr/local/bin/
 # Command -> Debian package, for the gateway's note after "command not
 # found": gemma4-e2b installed docker.io, which leaves the docker command to
 # docker-cli (a Recommends, skipped above), and took the missing command for
-# a PATH problem; logrotate it never installed at all.
+# a PATH problem; logrotate it never installed at all. Column 3: 0 for a
+# command in PATH, 1 for one in another bin folder, where an alternative
+# links it from at install (java, javac, swift: no package has /usr/bin/java).
 RUN arch=$(dpkg --print-architecture) \
     && for c in all "$arch"; do curl -fsSL "https://deb.debian.org/debian/dists/trixie/main/Contents-$c.gz" | zcat; done \
-    | awk '$1 ~ /^(usr\/)?(s?bin|games)\/[^\/]+$/ { n = split($1, p, "/"); m = split($NF, q, ","); for (i = 1; i <= m; i++) { sub(/.*\//, "", q[i]); print p[n] "\t" q[i] } }' \
+    | awk '{ r = $1 ~ /^(usr\/)?(s?bin|games)\/[^\/]+$/ ? 0 : $1 ~ /^(usr|opt)\/.*\/bin\/[^\/]+$/ ? 1 : -1 } r >= 0 { n = split($1, p, "/"); m = split($NF, q, ","); for (i = 1; i <= m; i++) { sub(/.*\//, "", q[i]); print p[n] "\t" q[i] "\t" r } }' \
     | sort -u > /usr/share/sandbox-commands.tsv \
     && test -s /usr/share/sandbox-commands.tsv
 
