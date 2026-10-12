@@ -80,6 +80,12 @@ def new(messages: list[dict]) -> litert_lm.Conversation:
       thinking_config=THINKING, constrained_decoding_config=CDC)
 
 
+def tokens(conv) -> int:
+  """Tokens in the conversation's KV cache (a property in this wrapper)."""
+  count = conv.token_count
+  return count() if callable(count) else count
+
+
 def send(conv, message, max_out: int = MAX_OUT) -> dict:
   t = time.time()
   first = None
@@ -90,7 +96,7 @@ def send(conv, message, max_out: int = MAX_OUT) -> dict:
       first = time.time() - t
     parts.append(text)
   return {"text": "".join(parts).strip(), "ttft_s": round(first or -1, 2),
-          "total_s": round(time.time() - t, 2), "tokens": conv.token_count()}
+          "total_s": round(time.time() - t, 2), "tokens": tokens(conv)}
 
 
 lib = engine._lib
@@ -132,7 +138,7 @@ for k, v in ref.items():
 
 # --- Q3a: is the system prompt prefilled at creation?
 c = new([sys_msg])
-log("lazy_preface", tokens_after_create=c.token_count(),
+log("lazy_preface", tokens_after_create=tokens(c),
     note="0 = the system prompt is prefilled only with the first message")
 c.close()
 
@@ -147,7 +153,7 @@ except Exception as e:  # The answer to Q1 may simply be "no".
   log("clone", ok=False, error=repr(e))
   print("SUMMARY " + json.dumps(summary, ensure_ascii=False), flush=True)
   raise SystemExit(0)
-log("clone", ok=True, clone_s=clone_s, tokens=a2c.token_count(),
+log("clone", ok=True, clone_s=clone_s, tokens=tokens(a2c),
     rss_before=before, rss_after=rss_mb())
 r = send(a2c, user(U2))
 log("clone_continues", same_as_ref=r["text"] == ref["2"]["text"],
