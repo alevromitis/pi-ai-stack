@@ -15,8 +15,8 @@ name: agent-tools
 #   searxng   searxng-external (owned by the searxng stack, must be up).
 #   web       agent-tools-web. kiwix-serve alone, for its published port.
 #
-#   mcp-shell       :8000  allowlisted commands, cwd /workspace
-#   mcp-filesystem  :8000  read/write confined to /workspace
+#   mcp-shell       :8000  allowlisted commands, cwd /workspace (disabled)
+#   mcp-filesystem  :8000  read/write confined to /workspace (disabled)
 #   mcp-playwright  :8931  headless Chromium; files to /workspace/playwright
 #   mcp-searxng     :8080  web search via searxng-1 + web_url_read (no workspace)
 #   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only
@@ -52,6 +52,9 @@ x-sandbox: &sandbox
 services:
   mcp-shell:
     <<: *sandbox
+    # Disabled 2026-10-13: LibreChat doesn't list it (librechat.yaml has it
+    # commented out). `docker compose --profile disabled up -d` brings it back.
+    profiles: ["disabled"]
     build:
       context: ./
     image: agent-tools-mcp:local
@@ -95,6 +98,9 @@ services:
 
   mcp-filesystem:
     <<: *sandbox
+    # Disabled 2026-10-13: LibreChat doesn't list it (librechat.yaml has it
+    # commented out). `docker compose --profile disabled up -d` brings it back.
+    profiles: ["disabled"]
     image: agent-tools-mcp:local
     container_name: mcp-filesystem-1
     depends_on:
