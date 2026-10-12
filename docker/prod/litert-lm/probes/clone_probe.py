@@ -18,8 +18,9 @@ Questions (PLAN-prefix-clone.md):
 Sampling is greedy (top_k 1), so equal histories must give equal text.
 Prints one line per step and a final JSON summary line.
 
---switching: only question 2, twice (MTP on, then off), with the texts, to
-tell a numeric drift caused by MTP from a broken state.
+--switching: only question 2, twice (MTP on, then off): two conversations
+alternating, clones of a snapshot that is never sent to again, and an
+original continued after its clone ran. Errors are logged, not fatal.
 """
 
 from __future__ import annotations
@@ -137,24 +138,48 @@ def first_difference(x: str, y: str) -> dict:
 
 
 def switching(label: str) -> None:
-  """Question 2 alone: one conversation uninterrupted, against a clone and
-  its original that each wait while another chat runs."""
+  """Question 2 alone, against one conversation that runs U1, U2, U3 with
+  nothing in between. Each case is logged, errors included, and the next
+  case runs regardless."""
   c = new([sys_msg])
   seq = [send(c, user(u))["text"] for u in (U1, U2, U3)]
   c.close()
+
+  def check(case: str, conv, turn: int) -> None:
+    try:
+      text = send(conv, user((U1, U2, U3)[turn - 1]))["text"]
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      log(f"{label}_{case}_turn{turn}", error=str(e).splitlines()[-1][:200])
+      return
+    same = text == seq[turn - 1]
+    log(f"{label}_{case}_turn{turn}", same_as_sequential=same,
+        **({} if same else first_difference(text, seq[turn - 1])))
+
+  # (a) Two conversations alternate; no clones.
   a = new([sys_msg])
   send(a, user(U1))
-  a2, _ = clone(a)
-  for conv in (a2, a):
-    send(conv, user(U2))
   b = new([sys_msg])
   send(b, user(UB))
-  for name, conv in (("clone", a2), ("original", a)):
-    text = send(conv, user(U3))["text"]
-    same = text == seq[2]
-    log(f"{label}_{name}_turn3", same_as_sequential=same,
-        **({} if same else first_difference(text, seq[2])))
-  for conv in (a, a2, b):
+  check("alternating", a, 2)
+  send(b, user("Now one about a dog."))
+  check("alternating", a, 3)
+  for conv in (a, b):
+    conv.close()
+
+  # (b) Clones of a base that is never sent to again: what a snapshot
+  # cache would do.
+  base = new([sys_msg])
+  send(base, user(U1))
+  c1, _ = clone(base)
+  check("snapshot_clone1", c1, 2)
+  check("snapshot_clone1", c1, 3)
+  c2, _ = clone(base)
+  check("snapshot_clone2", c2, 2)
+
+  # (c) The original continued after its clone ran (failed with MTP on in
+  # the third run).
+  check("original_after_clone", base, 2)
+  for conv in (base, c1, c2):
     conv.close()
 
 
@@ -163,8 +188,9 @@ if "--switching" in sys.argv:
   engine.close()
   server.litert_lm_engine = None
   _resolve = util.model.resolve_config_option
-  util.model.resolve_config_option = lambda value, m, key: (
-      False if key == "speculative_decoding" else _resolve(value, m, key))
+  util.model.resolve_config_option = lambda value, m, key, *args, **kwargs: (
+      False if key == "speculative_decoding"
+      else _resolve(value, m, key, *args, **kwargs))
   engine = util.get_or_initialize_server_engine(server, model_id=MODEL)
   log("engine_mtp_off", speculative=getattr(engine, "enable_speculative_decoding", None))
   lib = engine._lib

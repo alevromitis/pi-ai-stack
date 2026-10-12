@@ -1,6 +1,9 @@
 # Plan: cloned conversations for the prefix cache
 
-Status: **probe drafted, 2026-10-12.** Results below once it has run.
+Status: **probe run three times on 2026-10-12; nothing changed in prod.**
+Clones are exact and fast, but with MTP on a clone and its original are
+not independent (see Results). A fourth run (`--switching`) decides the
+design.
 
 ## Why
 
@@ -70,6 +73,53 @@ conversation built the way a cache miss builds it.
 - **1 fails:** stay with the title gate. Upstream may wrap clone in Python
   later.
 
-## Results
+## Results (2026-10-12)
 
-Not run yet.
+**Setup:** rpi, the serving image (0.18.0 wheel with the #3439 fix), CPU,
+YNNPACK, MTP, 16k context, pi-chat's system prompt (~890 tokens) with one
+tool, greedy sampling. Raw logs are in `~/litert-bench/ab/clone-probe*.log`
+on rpi.
+
+| Check | Result |
+|---|---|
+| Engine | init 7–10 s; RSS 2.26 GB (1.25 GB anon) |
+| Fresh conversation, system prompt + first message | first token after 11.7–12.7 s |
+| Is the system prompt prefilled at creation? | **No.** `token_count` is 0 until the first message |
+| `litert_lm_conversation_clone` | **Works.** 1.1 s; about +95–110 MB RAM per clone at ~920 tokens |
+| Clone continued | **Byte-identical** to a fresh conversation with the same history; first token after **1.8 s instead of 12.0 s** |
+| Original continued right after cloning | identical; first token after 0.6 s |
+| A second conversation alive at the same time | works and is exact; +~360 MB including its own history |
+| The clone, continued after the second chat ran | identical to an uninterrupted conversation (2 of 2 runs) |
+| **The original, continued after its clone and the second chat ran** | **Broken with MTP on.** One run gave different text. The other failed in the draft model: `llm_litert_mtp_drafter.cc:741 … Cannot auto-resize tensor kv_cache_v_3: no dims_signature exists` |
+| "System prompt only" by priming with a 1-token reply | **Not exact.** The one token opened a tool call, and the reply differs from `[system, user]` |
+
+**Not a clone effect: re-tokenization.** A conversation that keeps
+continuing its own KV drifts from one rebuilt from the same text by its
+third turn (993 vs 995 tokens, different reply). The generated tokens
+aren't always what re-tokenizing the reply gives. Today's cache misses
+rebuild from text, so they have this too; it isn't a regression.
+
+**What this means:**
+- Cloning itself is sound and turns a ~12 s prefill into ~2 s.
+- **With MTP on, a conversation and its clones share something in the
+  draft model** (its KV cache, by the error), so using one breaks the
+  other. A cache built on clones must never send to a conversation after
+  cloning it, if that pattern is safe at all.
+- **New chats are still blocked,** as expected: there is no
+  system-prompt-only state to clone.
+
+## Next run
+
+`./run-clone-probe.sh <system prompt> --switching`, about 5 minutes with
+litert-lm-1 stopped. It runs MTP on, then off, logging errors instead of
+stopping:
+- **(a) Two conversations alternating, no clones.** If exact with MTP on: a
+  small LRU of live conversations is safe today, Python only.
+- **(b) Clones of a snapshot that is never sent to again.** If exact with
+  MTP on: edits, regenerations and side requests can branch from snapshots.
+- **(c) The original after its clone ran,** which failed above. Expected
+  to pass with MTP off. If only MTP off is safe, it's a trade-off: MTP's
+  +37–73% decode against the multi-conversation cache.
+
+The shared draft-model state is worth an upstream issue, after the run
+pins it down.
