@@ -129,6 +129,8 @@ class _RecordingConversation:
   def __init__(self, conv: litert_lm.Conversation):
     self._conv = conv
     self.text_parts: list[str] = []
+    self.sent_parts: list[str] = []
+    self.reported = False
     self.tool_calls: list[litert_lm.ToolCall] = []
     self.completed = False
     self.cancelled = False
@@ -149,14 +151,41 @@ class _RecordingConversation:
     self.completed = True
 
   def reply(self) -> dict[str, Any]:
+    # The client sends back the reply it received, which the handlers
+    # rewrite (citations' Sources line, leaked control tokens scrubbed, the
+    # length note): matched against the raw text, every follow-up to a
+    # search-backed answer was a miss. The KV keeps the raw generation.
+    parts = self.sent_parts if self.reported else self.text_parts
     return {
         "role": "assistant",
-        "content": "".join(self.text_parts),
+        "content": "".join(parts),
         "tool_calls": [
             {"function": {"name": tc.name, "arguments": tc.arguments}}
             for tc in self.tool_calls
         ],
     }
+
+
+def sent(conv: Any, text: str | None) -> str | None:
+  """Records the non-streamed reply as the client gets it; returns it."""
+  if isinstance(conv, _RecordingConversation):
+    conv.reported = True
+    conv.sent_parts.append(text or "")
+  return text
+
+
+def recording(conv: Any, formatter: Any) -> Any:
+  """Makes the stream formatter record each content delta it sends."""
+  if isinstance(conv, _RecordingConversation):
+    conv.reported = True
+    format_delta = formatter.format_delta
+
+    def recorded_delta(text: str) -> bytes:
+      conv.sent_parts.append(text)
+      return format_delta(text)
+
+    formatter.format_delta = recorded_delta
+  return formatter
 
 
 class _Entry:

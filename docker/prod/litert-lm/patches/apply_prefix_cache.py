@@ -48,6 +48,21 @@ replacements = [
         "        constrained_decoding_config=constrained_decoding_config,\n"
         "    ) as (conv, prompt):\n",
     ),
+    # Record the reply as the client gets it, after every rewrite (Sources
+    # line, scrubbed tokens, length note), so its follow-up matches.
+    (
+        "    handler.headers_sent = True\n",
+        '    prefix_cache.sent(conv, resp_body["choices"][0]["message"]["content"])\n'
+        "    handler.headers_sent = True\n",
+    ),
+    (
+        "  formatter = _OpenAIChatCompletionsFormatter(\n"
+        "      now_str, created_ts, model_id, include_usage=include_usage\n"
+        "  )\n",
+        "  formatter = prefix_cache.recording(conv, _OpenAIChatCompletionsFormatter(\n"
+        "      now_str, created_ts, model_id, include_usage=include_usage\n"
+        "  ))\n",
+    ),
 ]
 
 for old, new in replacements:
