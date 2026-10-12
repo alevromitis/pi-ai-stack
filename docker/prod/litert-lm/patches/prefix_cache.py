@@ -36,7 +36,8 @@ engine to load and its first decode to warm up: 36 s to the first token
 with search and calculator on (2026-10-12). So each snapshot's request
 (system messages, tools, settings) is saved to LITERT_PREFIX_CACHE_WARM_FILE,
 and when the server starts it sends itself one-token requests for those
-saved the same UTC day, most recently used first (LibreChat's {{current_date}} is UTC too; an older
+saved the same UTC day, most recently used first, the rest only while no
+request has come for _WARM_IDLE_S (each holds the engine for 12-65 s) (LibreChat's {{current_date}} is UTC too; an older
 system prompt would not be asked for again). Real requests queue behind
 them, as they would behind the work they replace. The file holds the
 system prompts, saved memories included.
@@ -61,6 +62,7 @@ from __future__ import annotations
 import collections.abc
 import contextlib
 import copy
+import ctypes
 import datetime
 import hashlib
 import json
@@ -87,6 +89,10 @@ _WARM_FILE = os.environ.get(
 _WARM_PORT = 9379  # entrypoint.sh's `serve --port`.
 # Marks the server's own warm-up requests (an extra body field).
 _WARM_FIELD = "litert_prefix_cache_warm"
+_WARM_IDLE_S = 30
+# Monotonic time the last request other than a warm-up ended (at first, the
+# start), 0 while one runs.
+_last_request = time.monotonic()
 # The container's own cgroup (v2, private cgroup namespace).
 _MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
@@ -315,6 +321,22 @@ def _close_oldest(why: str) -> None:
   old.conv.close()
 
 
+def _trim() -> None:
+  """Hands freed heap back to the kernel after conversations are closed.
+
+  glibc keeps it otherwise: closing conversations and snapshots left the
+  container at 5.4 GB of anonymous memory with one chat and two snapshots
+  alive (2026-10-12), so the memory cap closed everything else and the Pi
+  swapped.
+  """
+  try:
+    before = _memory_mb()
+    ctypes.CDLL("libc.so.6").malloc_trim(0)
+    _log(f"trim: memory {before} -> {_memory_mb()} MB")
+  except (OSError, AttributeError):
+    pass
+
+
 def _over_memory() -> int | None:
   mb = _memory_mb()
   return mb if mb is not None and mb > _MAX_MB else None
@@ -323,16 +345,21 @@ def _over_memory() -> int | None:
 def _evict(max_entries: int) -> None:
   """Closes least recently used conversations past the caps.
 
-  The memory cap never closes the most recent one: the chat in use, or the
-  one last used when a miss is about to create a new conversation. Past
-  that, it closes snapshots, keeping the most recent one.
+  The memory cap closes snapshots first, keeping the most recent one: one
+  costs 12-65 s to rebuild, a chat's history can cost minutes. It never
+  closes the most recent chat: the one in use, or the one last used when a
+  miss is about to create a new conversation.
   """
   while len(_entries) > max_entries:
     _close_oldest(f"over {max_entries} cached")
-  while len(_entries) > 1 and (mb := _over_memory()):
-    _close_oldest(f"memory {mb} MB > {_MAX_MB} MB")
+  if _over_memory():
+    _trim()
   while len(_snapshots) > 1 and (mb := _over_memory()):
     _close_snapshot(f"memory {mb} MB > {_MAX_MB} MB")
+    _trim()
+  while len(_entries) > 1 and (mb := _over_memory()):
+    _close_oldest(f"memory {mb} MB > {_MAX_MB} MB")
+    _trim()
 
 
 def _extends(
@@ -474,8 +501,11 @@ def _warm() -> None:
       if time.monotonic() > deadline:
         return
       time.sleep(0.5)
-  for recipe in reversed(recipes):  # Most recently used first.
-    body = dict(recipe, stream=False, max_tokens=1, **{_WARM_FIELD: True})
+  for i, recipe in enumerate(reversed(recipes)):  # Most recently used first.
+    while i and not (
+        _last_request and time.monotonic() - _last_request > _WARM_IDLE_S):
+      time.sleep(1)
+    body = dict(recipe, stream=False, max_tokens=16, **{_WARM_FIELD: True})
     body["messages"] = recipe["messages"] + [{"role": "user", "content": "Hi."}]
     started = time.monotonic()
     try:
@@ -552,6 +582,10 @@ def conversation(
       yield conv, prompt
     return
 
+  global _last_request
+  warm = bool(body.get(_WARM_FIELD))
+  if not warm:
+    _last_request = 0.0
   name_map = name_by_tool_call_id or {}
   key = _config_key(body)
   canonical = [_canonical_message(m, name_map) for m in messages]
@@ -599,6 +633,9 @@ def conversation(
   except BaseException:
     recorder._conv.close()
     raise
+  finally:
+    if not warm:
+      _last_request = time.monotonic()
 
   # _stream_response swallows errors, so only a generator that ran to its
   # end without cancellation is known to have a KV cache matching `history`.
@@ -606,8 +643,7 @@ def conversation(
   # it fails and the conversation is closed then.
   # A retry replaced the conversation the request started with.
   conv = recorder._conv
-  if recorder.completed and not recorder.cancelled and not body.get(
-      _WARM_FIELD):
+  if recorder.completed and not recorder.cancelled and not warm:
     reply = _canonical_message(recorder.reply(), {})
     _entries.append(_Entry(engine, conv, key, canonical + [reply]))
     _evict(_MAX_ENTRIES)
