@@ -17,6 +17,9 @@ Questions (PLAN-prefix-clone.md):
 
 Sampling is greedy (top_k 1), so equal histories must give equal text.
 Prints one line per step and a final JSON summary line.
+
+--switching: only question 2, twice (MTP on, then off), with the texts, to
+tell a numeric drift caused by MTP from a broken state.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from __future__ import annotations
 import copy
 import ctypes
 import json
+import sys
 import time
 import types
 
@@ -125,6 +129,50 @@ def assistant(text: str) -> dict:
 
 
 sys_msg = {"role": "system", "content": SYSTEM}
+
+
+def first_difference(x: str, y: str) -> dict:
+  i = next((i for i, (p, q) in enumerate(zip(x, y)) if p != q), min(len(x), len(y)))
+  return {"at": i, "here": x[max(0, i - 20):i + 40], "there": y[max(0, i - 20):i + 40]}
+
+
+def switching(label: str) -> None:
+  """Question 2 alone: one conversation uninterrupted, against a clone and
+  its original that each wait while another chat runs."""
+  c = new([sys_msg])
+  seq = [send(c, user(u))["text"] for u in (U1, U2, U3)]
+  c.close()
+  a = new([sys_msg])
+  send(a, user(U1))
+  a2, _ = clone(a)
+  for conv in (a2, a):
+    send(conv, user(U2))
+  b = new([sys_msg])
+  send(b, user(UB))
+  for name, conv in (("clone", a2), ("original", a)):
+    text = send(conv, user(U3))["text"]
+    same = text == seq[2]
+    log(f"{label}_{name}_turn3", same_as_sequential=same,
+        **({} if same else first_difference(text, seq[2])))
+  for conv in (a, a2, b):
+    conv.close()
+
+
+if "--switching" in sys.argv:
+  switching("mtp_on")
+  engine.close()
+  server.litert_lm_engine = None
+  _resolve = util.model.resolve_config_option
+  util.model.resolve_config_option = lambda value, m, key: (
+      False if key == "speculative_decoding" else _resolve(value, m, key))
+  engine = util.get_or_initialize_server_engine(server, model_id=MODEL)
+  log("engine_mtp_off", speculative=getattr(engine, "enable_speculative_decoding", None))
+  lib = engine._lib
+  lib.litert_lm_conversation_clone.restype = ptr_type
+  lib.litert_lm_conversation_clone.argtypes = [ptr_type]
+  switching("mtp_off")
+  print("SUMMARY " + json.dumps(summary, ensure_ascii=False), flush=True)
+  raise SystemExit(0)
 
 # --- References: fresh conversations, one per history, as `serve` misses do.
 ref = {}
