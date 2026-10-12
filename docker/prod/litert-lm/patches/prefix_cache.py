@@ -15,14 +15,15 @@ tools or sampler settings) is a miss, served exactly like upstream; the
 cached conversations stay for the requests that do extend them. Several
 live conversations alternate exactly on this engine, MTP on or off
 (probes/clone_probe.py --switching, 2026-10-12). Each holds its KV cache in
-RAM, so the least recently used ones are closed past
-LITERT_PREFIX_CACHE_SIZE conversations or LITERT_PREFIX_CACHE_IDLE_TOKENS
-tokens in the ones not in use.
+RAM (~250-430 MB for a short chat on the Pi), so the least recently used
+ones are closed past LITERT_PREFIX_CACHE_SIZE conversations, and while the
+container's memory is over LITERT_PREFIX_CACHE_MAX_MB. The conversation in
+use is never closed for memory.
 
 Env:
-  LITERT_PREFIX_CACHE=0                 disable (pure upstream behaviour)
-  LITERT_PREFIX_CACHE_SIZE=3            most conversations kept alive
-  LITERT_PREFIX_CACHE_IDLE_TOKENS=8192  most tokens held by idle ones
+  LITERT_PREFIX_CACHE=0            disable (pure upstream behaviour)
+  LITERT_PREFIX_CACHE_SIZE=3       most conversations kept alive
+  LITERT_PREFIX_CACHE_MAX_MB=5120  close idle ones above this (cgroup memory)
 """
 
 from __future__ import annotations
@@ -41,7 +42,9 @@ from litert_lm import conversation as _conversation_module
 
 _ENABLED = os.environ.get("LITERT_PREFIX_CACHE", "1") != "0"
 _MAX_ENTRIES = max(1, int(os.environ.get("LITERT_PREFIX_CACHE_SIZE", "3")))
-_MAX_IDLE_TOKENS = int(os.environ.get("LITERT_PREFIX_CACHE_IDLE_TOKENS", "8192"))
+_MAX_MB = int(os.environ.get("LITERT_PREFIX_CACHE_MAX_MB", "5120"))
+# The container's own cgroup (v2, private cgroup namespace).
+_MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
 
 _original_normalize_message = _conversation_module.normalize_message
@@ -204,14 +207,17 @@ class _Entry:
     self.key = key
     self.history = history
 
-  def tokens(self) -> int:
-    count = self.conv.token_count  # A property in litert_lm 0.18.0.
-    return count() if callable(count) else count
-
-
 # Cached conversations, least recently used first. A request owns the one it
 # continues (or creates) until it completes cleanly.
 _entries: list[_Entry] = []
+
+
+def _memory_mb() -> int | None:
+  try:
+    with open(_MEMORY_CURRENT) as f:
+      return int(f.read()) // 2**20
+  except (OSError, ValueError):
+    return None
 
 
 def _close_oldest(why: str) -> None:
@@ -223,17 +229,16 @@ def _close_oldest(why: str) -> None:
 def _evict(max_entries: int) -> None:
   """Closes least recently used conversations past the caps.
 
-  The token cap counts every cached conversation but the most recent one:
-  the chat in use, or the one last used when a miss is about to create a
-  new conversation.
+  The memory cap never closes the most recent one: the chat in use, or the
+  one last used when a miss is about to create a new conversation.
   """
   while len(_entries) > max_entries:
     _close_oldest(f"over {max_entries} cached")
-  while (
-      len(_entries) > 1
-      and sum(e.tokens() for e in _entries[:-1]) > _MAX_IDLE_TOKENS
-  ):
-    _close_oldest(f"over {_MAX_IDLE_TOKENS} idle tokens")
+  while len(_entries) > 1:
+    mb = _memory_mb()
+    if mb is None or mb <= _MAX_MB:
+      break
+    _close_oldest(f"memory {mb} MB > {_MAX_MB} MB")
 
 
 def _extends(
@@ -348,5 +353,6 @@ def conversation(
     reply = _canonical_message(recorder.reply(), {})
     _entries.append(_Entry(engine, conv, key, canonical + [reply]))
     _evict(_MAX_ENTRIES)
+    _log(f"cached: {len(_entries)}, memory {_memory_mb()} MB")
   else:
     conv.close()

@@ -40,11 +40,13 @@ services:
       # 0 = upstream behaviour (full prefill on every request).
       LITERT_PREFIX_CACHE: "${LITERT_PREFIX_CACHE:-1}"
       # How many conversations stay alive, least recently used closed first,
-      # and how many tokens the ones not in use may hold in all. Each keeps
-      # its KV cache in RAM. 1 = only the last one (the behaviour before
+      # and the container memory (MB) above which idle ones are closed. Each
+      # keeps its KV cache in RAM: the engine is ~2.3 GB, a first chat brings
+      # the container to ~3.9 GB, each further short chat ~250-430 MB
+      # (2026-10-12). 1 = only the last one (the behaviour before
       # 2026-10-12).
       LITERT_PREFIX_CACHE_SIZE: "${LITERT_PREFIX_CACHE_SIZE:-3}"
-      LITERT_PREFIX_CACHE_IDLE_TOKENS: "${LITERT_PREFIX_CACHE_IDLE_TOKENS:-8192}"
+      LITERT_PREFIX_CACHE_MAX_MB: "${LITERT_PREFIX_CACHE_MAX_MB:-5120}"
       # 1 = answer LibreChat's memory agent without the model unless the
       # user's message asks to remember/forget (patches/memory_gate.py),
       # 0 = every memory request runs the model and evicts the prefix cache.
