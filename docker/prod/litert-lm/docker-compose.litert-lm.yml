@@ -47,10 +47,13 @@ services:
       # 2026-10-12).
       LITERT_PREFIX_CACHE_SIZE: "${LITERT_PREFIX_CACHE_SIZE:-3}"
       LITERT_PREFIX_CACHE_MAX_MB: "${LITERT_PREFIX_CACHE_MAX_MB:-5120}"
-      # 1 = new chats clone a snapshot holding only the system prompt
-      # (patches/prefill_preface_option.py), first token ~2-3 s instead of
-      # ~13 s; 0 = each new chat prefills its system prompt.
-      LITERT_PREFIX_CACHE_SNAPSHOT: "${LITERT_PREFIX_CACHE_SNAPSHOT:-1}"
+      # New chats clone a snapshot holding only the system prompt and tool
+      # schemas (patches/prefill_preface_option.py): first token ~5 s instead
+      # of 17 s with no tools, 29 s with search and calculator, 94 s with
+      # Playwright (2026-10-12). This many are kept, one per system prompt,
+      # tools and settings (preset), so switching between them doesn't
+      # prefill again; 1 = only the last, 0 = each new chat prefills.
+      LITERT_PREFIX_CACHE_SNAPSHOT: "${LITERT_PREFIX_CACHE_SNAPSHOT:-3}"
       # 1 = answer LibreChat's memory agent without the model unless the
       # user's message asks to remember/forget (patches/memory_gate.py),
       # 0 = every memory request runs the model and evicts the prefix cache.

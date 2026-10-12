@@ -23,7 +23,10 @@ use is never closed for memory.
 New chats (system message(s) then one user message) don't prefill the
 system prompt: they clone a snapshot that holds only it, prefilled when the
 snapshot was created (patches/prefill_preface_option.py) and never sent to.
-One snapshot is kept, for the last system prompt, tools and settings seen.
+A few snapshots are kept, one per system prompt, tools and settings, least
+recently used closed first: switching tools or presets would otherwise
+prefill the whole preface again (2026-10-12, Pi: 17 s with no tools, 29 s
+with Wikipedia, web search and calculator, 94 s with Playwright added).
 Clones of it continue exactly like a fresh conversation, with or without
 other clones alive (probes/clone_probe.py --snapshot-control, 2026-10-12);
 first token ~2-3 s instead of ~13 s. With MTP on, a clone (or a chat
@@ -35,7 +38,8 @@ Env:
   LITERT_PREFIX_CACHE=0            disable (pure upstream behaviour)
   LITERT_PREFIX_CACHE_SIZE=3       most conversations kept alive
   LITERT_PREFIX_CACHE_MAX_MB=5120  close idle ones above this (cgroup memory)
-  LITERT_PREFIX_CACHE_SNAPSHOT=0   new chats prefill their system prompt
+  LITERT_PREFIX_CACHE_SNAPSHOT=3   snapshots kept; 0 = new chats prefill
+                                   their system prompt
 """
 
 from __future__ import annotations
@@ -46,6 +50,7 @@ import copy
 import hashlib
 import json
 import os
+import time
 from typing import Any
 
 import click
@@ -56,7 +61,8 @@ from litert_lm import conversation as _conversation_module
 _ENABLED = os.environ.get("LITERT_PREFIX_CACHE", "1") != "0"
 _MAX_ENTRIES = max(1, int(os.environ.get("LITERT_PREFIX_CACHE_SIZE", "3")))
 _MAX_MB = int(os.environ.get("LITERT_PREFIX_CACHE_MAX_MB", "5120"))
-_SNAPSHOT = os.environ.get("LITERT_PREFIX_CACHE_SNAPSHOT", "1") != "0"
+_MAX_SNAPSHOTS = max(
+    0, int(os.environ.get("LITERT_PREFIX_CACHE_SNAPSHOT", "3")))
 # The container's own cgroup (v2, private cgroup namespace).
 _MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
@@ -283,19 +289,24 @@ def _close_oldest(why: str) -> None:
   old.conv.close()
 
 
+def _over_memory() -> int | None:
+  mb = _memory_mb()
+  return mb if mb is not None and mb > _MAX_MB else None
+
+
 def _evict(max_entries: int) -> None:
   """Closes least recently used conversations past the caps.
 
   The memory cap never closes the most recent one: the chat in use, or the
-  one last used when a miss is about to create a new conversation.
+  one last used when a miss is about to create a new conversation. Past
+  that, it closes snapshots, keeping the most recent one.
   """
   while len(_entries) > max_entries:
     _close_oldest(f"over {max_entries} cached")
-  while len(_entries) > 1:
-    mb = _memory_mb()
-    if mb is None or mb <= _MAX_MB:
-      break
+  while len(_entries) > 1 and (mb := _over_memory()):
     _close_oldest(f"memory {mb} MB > {_MAX_MB} MB")
+  while len(_snapshots) > 1 and (mb := _over_memory()):
+    _close_snapshot(f"memory {mb} MB > {_MAX_MB} MB")
 
 
 def _extends(
@@ -354,8 +365,22 @@ def _match(
   return best
 
 
-# (engine, settings key, canonical system messages, conversation) or None.
-_snapshot: tuple[Any, str, list[tuple[Any, ...]], Any] | None = None
+class _Snapshot:
+
+  def __init__(self, engine, key: str, system: list[tuple[Any, ...]], conv):
+    self.engine = engine
+    self.key = key
+    self.system = system
+    self.conv = conv
+
+# System-prompt snapshots, least recently used first.
+_snapshots: list[_Snapshot] = []
+
+
+def _close_snapshot(why: str) -> None:
+  old = _snapshots.pop(0)
+  _log(f"snapshot: closed one ({why})")
+  old.conv.close()
 
 
 def _clone(conv):
@@ -375,25 +400,36 @@ def _clone(conv):
 
 def _new_chat(engine, key, canonical, messages, translated_messages,
               create_kwargs):
-  """A clone of the system-prompt snapshot for a new chat, or None."""
-  global _snapshot
-  if (not _SNAPSHOT or len(messages) < 2 or messages[-1].get("role") != "user"
+  """The snapshot for a new chat's system prompt, tools and settings, or None.
+
+  Most recently used last; created if none matches.
+  """
+  if (not _MAX_SNAPSHOTS or len(messages) < 2
+      or messages[-1].get("role") != "user"
       or any(m.get("role") != "system" for m in messages[:-1])):
     return None
+  for s in [s for s in _snapshots if s.engine is not engine]:
+    _snapshots.remove(s)
+    s.conv.close()
   system = canonical[:-1]
-  if _snapshot is not None and _snapshot[:3] != (engine, key, system):
-    _log("snapshot: replaced (other system prompt, tools or settings)")
-    _snapshot[3].close()
-    _snapshot = None
-  if _snapshot is None:
+  snap = next(
+      (s for s in _snapshots if s.key == key and s.system == system), None)
+  if snap is not None:
+    _snapshots.remove(snap)
+  else:
+    while len(_snapshots) >= _MAX_SNAPSHOTS:
+      _close_snapshot(f"over {_MAX_SNAPSHOTS} kept")
     # With prefill_preface_option.py this argument means "prefill the
     # preface on creation"; the filter keeps its default.
+    started = time.monotonic()
     conv = engine.create_conversation(
         messages=translated_messages[:-1],
         filter_channel_content_from_kv_cache=True, **create_kwargs)
-    _snapshot = (engine, key, system, conv)
-    _log("snapshot: created")
-  return _clone(_snapshot[3])
+    snap = _Snapshot(engine, key, system, conv)
+    _log(f"snapshot: created in {time.monotonic() - started:.1f} s "
+         f"({len(_snapshots) + 1} kept)")
+  _snapshots.append(snap)
+  return snap
 
 
 @contextlib.contextmanager
@@ -428,8 +464,10 @@ def conversation(
         messages=translated_messages[:-1], **create_kwargs)
     return conv, prompt, "a fresh conversation"
 
+  snap = None
+
   def reclone():
-    return _clone(_snapshot[3]), prompt, "a new clone of the snapshot"
+    return _clone(snap.conv), prompt, "a new clone of the snapshot"
 
   fallbacks = [fresh]
   entry = _match(engine, key, canonical, messages)
@@ -443,8 +481,10 @@ def conversation(
     _evict(_MAX_ENTRIES - 1)  # Room for the new conversation's session.
     conv = None
     try:
-      conv = _new_chat(engine, key, canonical, messages, translated_messages,
+      snap = _new_chat(engine, key, canonical, messages, translated_messages,
                        create_kwargs)
+      if snap is not None:
+        conv = _clone(snap.conv)
     except Exception as e:  # pylint: disable=broad-exception-caught
       _log(f"snapshot: failed ({e}); prefilling the system prompt")
     if conv is not None:
