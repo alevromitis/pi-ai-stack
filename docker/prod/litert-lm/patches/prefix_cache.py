@@ -36,7 +36,7 @@ engine to load and its first decode to warm up: 36 s to the first token
 with search and calculator on (2026-10-12). So each snapshot's request
 (system messages, tools, settings) is saved to LITERT_PREFIX_CACHE_WARM_FILE,
 and when the server starts it sends itself one-token requests for those
-saved the same UTC day (LibreChat's {{current_date}} is UTC too; an older
+saved the same UTC day, most recently used first (LibreChat's {{current_date}} is UTC too; an older
 system prompt would not be asked for again). Real requests queue behind
 them, as they would behind the work they replace. The file holds the
 system prompts, saved memories included.
@@ -85,6 +85,8 @@ _MAX_SNAPSHOTS = max(
 _WARM_FILE = os.environ.get(
     "LITERT_PREFIX_CACHE_WARM_FILE", "/root/.litert-lm/prefix-snapshots.json")
 _WARM_PORT = 9379  # entrypoint.sh's `serve --port`.
+# Marks the server's own warm-up requests (an extra body field).
+_WARM_FIELD = "litert_prefix_cache_warm"
 # The container's own cgroup (v2, private cgroup namespace).
 _MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
@@ -472,8 +474,8 @@ def _warm() -> None:
       if time.monotonic() > deadline:
         return
       time.sleep(0.5)
-  for recipe in recipes:  # Least recently used first, as they were kept.
-    body = dict(recipe, stream=False, max_tokens=1)
+  for recipe in reversed(recipes):  # Most recently used first.
+    body = dict(recipe, stream=False, max_tokens=1, **{_WARM_FIELD: True})
     body["messages"] = recipe["messages"] + [{"role": "user", "content": "Hi."}]
     started = time.monotonic()
     try:
@@ -516,6 +518,11 @@ def _new_chat(engine, key, canonical, messages, translated_messages,
     snap = _Snapshot(engine, key, system, conv, _recipe(body))
     _log(f"snapshot: created in {time.monotonic() - started:.1f} s "
          f"({len(_snapshots) + 1} kept)")
+  if body.get(_WARM_FIELD):
+    # Replayed most recent first: each goes before those already rebuilt.
+    # The file already lists them all.
+    _snapshots.insert(0, snap)
+    return snap
   snap.recipe["saved"] = _today()
   _snapshots.append(snap)
   _save_warm()
@@ -599,7 +606,8 @@ def conversation(
   # it fails and the conversation is closed then.
   # A retry replaced the conversation the request started with.
   conv = recorder._conv
-  if recorder.completed and not recorder.cancelled:
+  if recorder.completed and not recorder.cancelled and not body.get(
+      _WARM_FIELD):
     reply = _canonical_message(recorder.reply(), {})
     _entries.append(_Entry(engine, conv, key, canonical + [reply]))
     _evict(_MAX_ENTRIES)
