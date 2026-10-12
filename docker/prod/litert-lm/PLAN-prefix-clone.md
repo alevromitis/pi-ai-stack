@@ -161,3 +161,50 @@ messages with nothing in between.
    - **Live:** new chats' first token 4.8–5.0 s instead of ~13–17 s; the
      first after a restart 26 s (creates the snapshot). Rollback image
      `litert-lm-rpi5:pre-e1122d4`.
+
+## Follow-up: drafter faults with clones (2026-10-12, evening)
+
+Turning LibreChat's memory gate off (aded96c) sent every message's memory
+request to the model, ahead of its reply, replacing this snapshot each time.
+A fix that ran them in idle time from their own snapshot (branch
+`memory-scheduler`, not deployed) was tested on the Pi and exposed faults in
+the snapshot's clones themselves:
+
+- **Crashes before the first token,** in the MTP drafter:
+  `llm_litert_mtp_drafter.cc:741 … Cannot auto-resize tensor kv_cache_k_N:
+  no dims_signature exists`, once `Custom allocation is too small for tensor`
+  / `Failed to allocate tensors`, then `Task failed with state: 7` on the same
+  conversation.
+- **Not caused by the memory requests.** `probes/mtp_interleave_probe.py`
+  (thinking chats like pi-chat's cloned from the snapshot, 4 cycles each):
+
+  | Scenario | Chat requests failed |
+  |---|---|
+  | control: clones only, each closed after its second message | 2 of 8 (the 4th clone, then its follow-up) |
+  | a memory-style conversation (other tools, thinking off) between, MTP on | 0 of 16 |
+  | the same with MTP off | 0 of 16 |
+  | the same, kept alive instead of closed | 2 of 4, then the process died |
+
+- **A retry on a fresh conversation always went through** (4 of 4 in the
+  probe, 1 of 1 in the server test below), so `prefix_cache.py` now retries a
+  request whose conversation faults before its first token
+  (`_ENGINE_FAULTS`): a new chat on a new clone, then a fresh conversation; a
+  cached chat on a fresh conversation (its first token then takes ~27 s
+  instead of ~6 s).
+- **One silently wrong answer.** In the server test with retries (8 new chats
+  and 8 follow-ups, each with a memory request, the container over the
+  5,120 MB cap), a new chat that had thought and answered correctly in round 1
+  ("enots") answered "stone" with no thinking in round 2, and its follow-up
+  came back empty. No error was raised, so nothing retried it. The other two
+  repeated new chats matched round 1 exactly.
+- **The Pi then stopped answering** (SSH and `tailscale ping`) about 25
+  minutes into that test, with the container at ~5.4 GB.
+- **Root cause not found.** In v0.18.0 the drafter is one object per
+  executor, holding `Duplicate()`s of the running conversation's KV buffers
+  and an `mtp_primed_` flag that outlive a switch of conversation. No
+  matching upstream issue was found.
+
+So "clones of a frozen snapshot are safe" holds for the probe runs above,
+but not under longer churn. If wrong answers show up in real chats,
+`LITERT_PREFIX_CACHE_SNAPSHOT=0` or `LITERT_SPECULATIVE_DECODING=false` are
+the switches to try.

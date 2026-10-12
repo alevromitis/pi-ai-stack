@@ -26,7 +26,10 @@ snapshot was created (patches/prefill_preface_option.py) and never sent to.
 One snapshot is kept, for the last system prompt, tools and settings seen.
 Clones of it continue exactly like a fresh conversation, with or without
 other clones alive (probes/clone_probe.py --snapshot-control, 2026-10-12);
-first token ~2-3 s instead of ~13 s.
+first token ~2-3 s instead of ~13 s. With MTP on, a clone (or a chat
+continuing one) sometimes faults in the drafter before its first token; the
+request is then retried on a new clone or a fresh conversation
+(_ENGINE_FAULTS).
 
 Env:
   LITERT_PREFIX_CACHE=0            disable (pure upstream behaviour)
@@ -57,6 +60,18 @@ _SNAPSHOT = os.environ.get("LITERT_PREFIX_CACHE_SNAPSHOT", "1") != "0"
 # The container's own cgroup (v2, private cgroup namespace).
 _MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
+# With MTP on, a conversation cloned from a snapshot, or one continuing such
+# a clone, sometimes fails in the drafter before its first token: "Cannot
+# auto-resize tensor kv_cache_k_N: no dims_signature exists", "Failed to
+# allocate tensors", then "Task failed with state: 7" on that conversation.
+# It happened with chats alone, 2 of 8 requests in one run
+# (probes/mtp_interleave_probe.py, 2026-10-12). The same request on a fresh
+# conversation went through every time, so it is retried there.
+_ENGINE_FAULTS = (
+    "Cannot auto-resize tensor",
+    "Failed to allocate tensors",
+    "Task failed with state",
+)
 
 _original_normalize_message = _conversation_module.normalize_message
 
@@ -145,17 +160,28 @@ def _config_key(body: collections.abc.Mapping[str, Any]) -> str:
   return json.dumps({k: body.get(k) for k in keys}, sort_keys=True)
 
 
-class _RecordingConversation:
-  """Proxies a Conversation and records the reply it generates."""
+def engine_fault(e: BaseException) -> bool:
+  """An error from the engine's buffers, not from the request."""
+  return any(sign in str(e) for sign in _ENGINE_FAULTS)
 
-  def __init__(self, conv: litert_lm.Conversation):
+
+class _RecordingConversation:
+  """Proxies a Conversation and records the reply it generates.
+
+  `fallbacks` make fresh conversations, each with the message to send it,
+  for an engine fault before the first token (see _ENGINE_FAULTS).
+  """
+
+  def __init__(self, conv: litert_lm.Conversation, fallbacks=()):
     self._conv = conv
+    self._fallbacks = list(fallbacks)
     self.text_parts: list[str] = []
     self.sent_parts: list[str] = []
     self.reported = False
     self.tool_calls: list[litert_lm.ToolCall] = []
     self.completed = False
     self.cancelled = False
+    self.retried = False
 
   def __getattr__(self, name: str) -> Any:
     return getattr(self._conv, name)
@@ -164,12 +190,32 @@ class _RecordingConversation:
     self.cancelled = True
     self._conv.cancel_process()
 
-  def send_message_async(self, *args, **kwargs):
-    # Chunks are litert_lm.Message; str() is its text, as upstream sends it.
-    for chunk in self._conv.send_message_async(*args, **kwargs):
-      self.text_parts.append(str(chunk))
-      self.tool_calls.extend(chunk.tool_calls)
-      yield chunk
+  def send_message_async(self, message, *args, **kwargs):
+    while True:
+      started = False
+      try:
+        # Chunks are litert_lm.Message; str() is its text, as upstream
+        # sends it.
+        for chunk in self._conv.send_message_async(message, *args, **kwargs):
+          started = True
+          self.text_parts.append(str(chunk))
+          self.tool_calls.extend(chunk.tool_calls)
+          yield chunk
+        break
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        if started or self.cancelled or not self._fallbacks or not engine_fault(e):
+          raise
+        why = str(e).strip().splitlines()[-1].lstrip("└ ")[:80]
+        self._conv.close()
+        while True:
+          try:
+            self._conv, message, how = self._fallbacks.pop(0)()
+            break
+          except Exception:  # pylint: disable=broad-exception-caught
+            if not self._fallbacks:
+              raise
+        self.retried = True
+        _log(f"engine fault before the first token ({why}); retrying on {how}")
     self.completed = True
 
   def reply(self) -> dict[str, Any]:
@@ -377,6 +423,15 @@ def conversation(
   key = _config_key(body)
   canonical = [_canonical_message(m, name_map) for m in messages]
 
+  def fresh():
+    conv = engine.create_conversation(
+        messages=translated_messages[:-1], **create_kwargs)
+    return conv, prompt, "a fresh conversation"
+
+  def reclone():
+    return _clone(_snapshot[3]), prompt, "a new clone of the snapshot"
+
+  fallbacks = [fresh]
   entry = _match(engine, key, canonical, messages)
   if entry is not None:
     conv = entry.conv
@@ -394,23 +449,26 @@ def conversation(
       _log(f"snapshot: failed ({e}); prefilling the system prompt")
     if conv is not None:
       _log("new chat: cloned the system-prompt snapshot")
+      fallbacks = [reclone, fresh]
     else:
       conv = engine.create_conversation(
           messages=translated_messages[:-1], **create_kwargs
       )
     send = prompt
 
-  recorder = _RecordingConversation(conv)
+  recorder = _RecordingConversation(conv, fallbacks)
   try:
     yield recorder, send
   except BaseException:
-    conv.close()
+    recorder._conv.close()
     raise
 
   # _stream_response swallows errors, so only a generator that ran to its
   # end without cancellation is known to have a KV cache matching `history`.
   # A reply cut off at the token limit also ends "normally"; the next send on
   # it fails and the conversation is closed then.
+  # A retry replaced the conversation the request started with.
+  conv = recorder._conv
   if recorder.completed and not recorder.cancelled:
     reply = _canonical_message(recorder.reply(), {})
     _entries.append(_Entry(engine, conv, key, canonical + [reply]))

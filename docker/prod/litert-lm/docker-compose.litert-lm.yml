@@ -54,7 +54,12 @@ services:
       # 1 = answer LibreChat's memory agent without the model unless the
       # user's message asks to remember/forget (patches/memory_gate.py),
       # 0 = every memory request runs the model and evicts the prefix cache.
-      LITERT_MEMORY_GATE: "${LITERT_MEMORY_GATE:-0}"
+      # Off (aded96c), each message's memory request went ahead of its reply
+      # and replaced the new-chat snapshot: ~30 s of a 64 s question. The
+      # fix (branch memory-scheduler) wasn't deployed: under its extra
+      # conversations the Pi's MTP clones faulted and once answered wrongly
+      # (PLAN-prefix-clone.md, 2026-10-12).
+      LITERT_MEMORY_GATE: "${LITERT_MEMORY_GATE:-1}"
       # 1 = answer LibreChat's chat-title request with a title cut from the
       # first message (patches/title_gate.py), 0 = the model writes titles,
       # which evicts the chat and re-prefills it on its second message.
