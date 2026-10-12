@@ -35,14 +35,6 @@ messages since the last user turn hold results from the search tools
    Listing every result, as before, cited "The Greek" and "The God
    Beneath the Sea" for Poseidon.
 
-Searches are in English (user, 2026-10-10): English Wikipedia and English
-web results. The result of any search the model wrote in another language
-("río más largo de Europa", "富士山の高さ") is replaced, in every request
-and before anything reads it, by a note to search again in English: in
-Spanish it cited a Spanish map page, in Japanese it found "Japanese
-conjugation" and gave up. Replaced the same way each time, the history
-still matches the prefix cache. What counts as English: see english().
-
 When no search ran since the user's message, a Sources block passes
 untouched only if every link in it came from a tool result earlier in the
 chat (a follow-up citing the last turn's article). Otherwise it is dropped:
@@ -65,8 +57,7 @@ Text streams as before; only a line that might start a Sources block waits
 for its newline, and a bracket that might start a citation for its end.
 
 Env:
-  LITERT_CITATIONS=0       disable (replies pass through untouched)
-  LITERT_ENGLISH_SEARCH=0  keep results of searches in other languages
+  LITERT_CITATIONS=0  disable (replies pass through untouched)
 """
 
 from __future__ import annotations
@@ -74,13 +65,11 @@ from __future__ import annotations
 import json
 import os
 import re
-import unicodedata
 from typing import Any
 
 import click
 
 _ENABLED = os.environ.get("LITERT_CITATIONS", "1") != "0"
-_ENGLISH_ONLY = os.environ.get("LITERT_ENGLISH_SEARCH", "1") != "0"
 
 _URL = re.compile(r"https?://[^\s)\]>\"'<]+")
 # Wikipedia paths hold balanced parentheses: [Titan (moon)](.../Titan_(moon)).
@@ -122,7 +111,7 @@ what when where which while will with would your today according sure
 certainly called located known also
 """.split())
 # Names in an answer: "Poseidon", "Au", "NaCl"; not a capitalised "The".
-_CAPITALISED = re.compile(r"\b[A-ZÀ-ÞΑ-Ω][^\W_]+")
+_CAPITALISED = re.compile(r"\b[A-ZÀ-Þ][^\W_]+")
 _SHORT = frozenset("""
 the and but for nor yet its his her our you she him they them who how why
 was are has had not can may all any few one two six ten yes per via in on
@@ -130,90 +119,8 @@ at to of is as by or if it we he me my so no do be an up us am
 """.split())
 
 
-_SEARCHES = ("wikipedia_search", "searxng_web_search")
-_NOT_ENGLISH = (
-    "No results: searches are in English, and this query isn't. Search again in"
-    " English, with the English name of what you are asking about first"
-    " (\"Oxygen atomic number\"). Still answer in the user's language."
-)
-_LETTERS = re.compile(r"[^\W\d_]+")
-# Words that mark text as written in another language: articles, pronouns,
-# question words and verbs of the languages most often asked in. Left out:
-# words that are English too ("son", "war", "dove", "come") and lone name
-# particles ("Los Angeles", "da Vinci", "von der Leyen"), which is why it
-# takes two. (Same list as agent-tools/wikipedia/wiki.py.)
-_FOREIGN = frozenset("""
-el los las del una unos unas como cual cuál cuáles donde dónde qué quién quiénes cuándo cuánto cuántos
-cuántas más por para pero también sobre entre hasta desde está están fue son y
-der die das und ist sind wie wo wer wann warum welche welcher welchem welches nicht ein eine einen
-einem eines dem zum zur im vom hoch liegt gibt
-le les des une est sont dans pour sur qui quel quelle quels quelles où quand comment pourquoi combien
-était avec
-il gli della delle degli dei nel nella che quale quali quando perché quanto quanti quante sono
-uma umas uns qual quais onde quem porque quantos quantas não são tem
-het een niet waar hoeveel waarom
-""".split())
-_ENGLISH = frozenset("""
-the of and is in what who whom how where when which why are was were does did do to for with on at by
-from a an it this that
-""".split())
-
-
 def _log(text: str) -> None:
   click.echo(click.style(f"citations: {text}", fg="cyan"))
-
-
-def english(text: str) -> bool:
-  """Whether the text reads as English: mostly Latin letters, and not two
-  or more of another language's function words outnumbering English ones."""
-  letters = "".join(_LETTERS.findall(text))
-  latin = sum(unicodedata.name(c, "").startswith("LATIN") for c in letters)
-  if latin * 2 < len(letters):
-    return False
-  words = _LETTERS.findall(text.lower())
-  foreign = sum(w in _FOREIGN for w in words)
-  return foreign < 2 or foreign <= sum(w in _ENGLISH for w in words)
-
-
-def _copied(query: str, asked: str) -> bool:
-  """Whether a query copies the words of a message not in English: "Estados
-  do Brasil" for "Quantos estados tem o Brasil?". Only words the message
-  writes in lowercase count, so a name searched in English ("Real Madrid
-  founded") passes."""
-  if english(asked):
-    return False
-  common = {w for w in re.findall(r"\b[^\W\d_]{4,}\b", asked) if w.islower()}
-  terms = [w.lower() for w in _LETTERS.findall(query) if len(w) >= 3]
-  shared = sum(w in common for w in terms)
-  return shared >= 2 or shared == 1 and len(terms) <= 2
-
-
-def english_only(body: dict[str, Any]) -> None:
-  """Replaces, in place, the results of searches whose query isn't English."""
-  messages = body.get("messages")
-  if not _ENGLISH_ONLY or not isinstance(messages, list):
-    return
-  foreign: set[Any] = set()
-  asked = ""
-  for msg in messages:
-    if not isinstance(msg, dict):
-      continue
-    if msg.get("role") == "user":
-      asked = _text(msg.get("content"))
-    for call in msg.get("tool_calls") or []:
-      fn = (call.get("function") or {}) if isinstance(call, dict) else {}
-      if not str(fn.get("name") or "").startswith(_SEARCHES):
-        continue
-      try:
-        args = json.loads(fn.get("arguments") or "{}")
-      except (TypeError, ValueError):
-        continue
-      query = str(args.get("query") or "") if isinstance(args, dict) else ""
-      if query and (not english(query) or _copied(query, asked)):
-        foreign.add(call.get("id"))
-    if msg.get("role") == "tool" and msg.get("tool_call_id") in foreign and msg.get("content") != _NOT_ENGLISH:
-      msg["content"] = _NOT_ENGLISH
-      _log("replaced the result of a search not in English")
 
 
 def _text(content: Any) -> str:
@@ -332,10 +239,8 @@ def collect(body: dict[str, Any]) -> Offered | None:
   """Per tool result since the last user message, its sources.
 
   Empty when there are none (the reply is still filtered), None when
-  disabled. Runs first on every request, so it also replaces the results
-  of searches not in English (english_only) for everything after it.
+  disabled.
   """
-  english_only(body)
   messages = body.get("messages")
   if not _ENABLED or not isinstance(messages, list):
     return None

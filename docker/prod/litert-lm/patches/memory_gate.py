@@ -35,12 +35,11 @@ _MEMORY_TOOLS = frozenset({"set_memory", "delete_memory"})
 
 # The phrases LibreChat's default memory instructions list ("remember",
 # "don't forget", "store this", "forget", "delete the memory"), plus "keep in
-# mind" and memorise/memory, in English and Greek (θυμ-, ξεχ-, μνήμ-). A false
-# match only costs one model call; a missed one means nothing is saved.
+# mind" and memorise/memory. A false match only costs one model call; a
+# missed one means nothing is saved.
 _MEMORY_WORDS = re.compile(
     r"\bremember|\bforget|\bforgot|\bmemor[iy]|\bkeep in mind\b"
-    r"|\bstore (?:this|that)\b"
-    r"|θυμ|ξ[εέ]χ|μν[ηή]μ",
+    r"|\bstore (?:this|that)\b",
     re.IGNORECASE,
 )
 

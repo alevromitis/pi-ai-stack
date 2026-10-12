@@ -4,9 +4,9 @@ Not part of upstream LiteRT-LM: copied into litert_lm_cli/commands/serve/ by
 the Dockerfile and wired in by apply_reminder.py.
 
 gemma4-e2b follows the newest turn far more than a system prompt thousands
-of tokens back: asked in the system prompt to reply in English, it mostly
-didn't with thinking off; the same request appended to the user's message
-was followed 8 times out of 8 (2026-10-10). So instead of rules for
+of tokens back: a rule in the system prompt was mostly ignored with
+thinking off; the same rule appended to the user's message was followed 8
+times out of 8 (2026-10-10). So instead of rules for
 kinds of questions, the system prompt ends with one general paragraph on how
 to work out any answer (what is asked, where each fact and number comes
 from, what to cite), and every user message gets a copy of it in

@@ -371,10 +371,8 @@ class Wiki:
         return after_word and re.search(r"\b(?:is|was|are|were)\b", lead) is not None
 
     def _first_meaning(self, path: str) -> str:
-        """For a page that only lists meanings, the first one it lists: asked
-        in Italian, the model searched "Cappella Sistina", got that page
-        ("may refer to: The Sistine Chapel in the Vatican Palace ...") and a
-        painter of another chapel of that name, and named him."""
+        """For a page that only lists meanings ("may refer to: ..."), the
+        first one it lists, not the list and whatever else shares the name."""
         html = bytes(self._resolve(path).get_item().content).decode("utf-8", "replace")
         if not _disambiguation(html):
             return path
@@ -445,39 +443,6 @@ def trim(text: str, limit: int, query: str = "") -> str:
     return (cut[: stop + 1] if stop > limit * 0.6 else cut.rstrip()) + " …"
 
 
-# Words that mark a query as written in another language: articles,
-# pronouns, question words and verbs of the languages most often asked in.
-# Left out: words that are English too ("son", "war", "dove", "come") and
-# lone name particles ("Los Angeles", "da Vinci", "von der Leyen"), which
-# is why it takes two. (Same list as litert-lm's patches/citations.py.)
-FOREIGN = frozenset("""
-el los las del una unos unas como cual cuál cuáles donde dónde qué quién quiénes cuándo cuánto cuántos
-cuántas más por para pero también sobre entre hasta desde está están fue son y
-der die das und ist sind wie wo wer wann warum welche welcher welchem welches nicht ein eine einen
-einem eines dem zum zur im vom hoch liegt gibt
-le les des une est sont dans pour sur qui quel quelle quels quelles où quand comment pourquoi combien
-était avec
-il gli della delle degli dei nel nella che quale quali quando perché quanto quanti quante sono
-uma umas uns qual quais onde quem porque quantos quantas não são tem
-het een niet waar hoeveel waarom
-""".split())
-ENGLISH = frozenset("""
-the of and is in what who whom how where when which why are was were does did do to for with on at by
-from a an it this that
-""".split())
-
-
-def english(text: str) -> bool:
-    """Whether the text reads as English: mostly Latin letters, and not two
-    or more of another language's function words outnumbering English ones."""
-    letters = [c for c in text if c.isalpha()]
-    if sum(unicodedata.name(c, "").startswith("LATIN") for c in letters) * 2 < len(letters):
-        return False
-    words = re.findall(r"[^\W\d_]+", text.lower())
-    foreign = sum(w in FOREIGN for w in words)
-    return foreign < 2 or foreign <= sum(w in ENGLISH for w in words)
-
-
 def render(query: str, passages: list[Passage], date: str, results: int, chars: int, link_base: str) -> str:
     """Passages, then one ready-made Sources line the model is told to end with.
 
@@ -490,16 +455,6 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
     this (2026-10-10).
     """
     lines = [f"Wikipedia (offline copy, {date[:7]}) for: {query}"]
-    if not english(query):
-        # Searches are in English (user, 2026-10-10). In another language
-        # they find only stray matches: "富士山の高さ" got "Japanese
-        # conjugation", and the model said it didn't know.
-        lines.append(
-            "No results: this Wikipedia is in English, and the query isn't. Search again"
-            " in English, with the English name of what you are asking about first"
-            " (\"Oxygen atomic number\"). Still answer in the user's language."
-        )
-        return "\n".join(lines)
     if not passages:
         lines.append("No results.")
         return "\n".join(lines)
