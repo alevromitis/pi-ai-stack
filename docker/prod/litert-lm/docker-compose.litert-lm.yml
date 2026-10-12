@@ -29,6 +29,12 @@ services:
       # Bigger = handles longer chats/system prompts, but costs more RAM for
       # the KV cache — watch memory if you raise this much further.
       LITERT_MAX_NUM_TOKENS: "${LITERT_MAX_NUM_TOKENS:-8192}"
+      # true = multi-token prediction: the model file's MTP drafter proposes
+      # tokens and the model checks several per step (config.json's
+      # `speculative_decoding`). Decode +37-73% on the Pi (2026-10-12, real
+      # chats), prefill unchanged. The drafter and verifier are greedy, so the
+      # request's temperature/top_p/top_k are ignored.
+      LITERT_SPECULATIVE_DECODING: "${LITERT_SPECULATIVE_DECODING:-false}"
       # 1 = reuse the last conversation's KV cache (patches/prefix_cache.py),
       # 0 = upstream behaviour (full prefill on every request).
       LITERT_PREFIX_CACHE: "${LITERT_PREFIX_CACHE:-1}"

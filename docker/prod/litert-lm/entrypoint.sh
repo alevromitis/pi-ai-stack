@@ -9,7 +9,8 @@ mkdir -p "${REGISTRY_DIR}"
 : "${LITERT_MODEL_FILE:=gemma-4-E2B-it.litertlm}"
 : "${LITERT_BACKEND:=cpu}"
 : "${LITERT_MAX_NUM_TOKENS:=8192}"
-export LITERT_MODEL_ID LITERT_BACKEND LITERT_MAX_NUM_TOKENS
+: "${LITERT_SPECULATIVE_DECODING:=false}"
+export LITERT_MODEL_ID LITERT_BACKEND LITERT_MAX_NUM_TOKENS LITERT_SPECULATIVE_DECODING
 
 # Render config.json so the OpenAI server knows which hardware backend to
 # use for this model id (standard OpenAI requests have no such field).

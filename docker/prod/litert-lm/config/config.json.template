@@ -7,7 +7,7 @@
     "${LITERT_MODEL_ID}": {
       "backend": "${LITERT_BACKEND}",
       "max_num_tokens": ${LITERT_MAX_NUM_TOKENS},
-      "speculative_decoding": false
+      "speculative_decoding": ${LITERT_SPECULATIVE_DECODING}
     }
   }
 }
