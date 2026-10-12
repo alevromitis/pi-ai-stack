@@ -492,6 +492,7 @@ def _save_warm() -> None:
 def _warm() -> None:
   """Replays today's saved snapshot requests once the server listens."""
   recipes = [r for r in _load_warm() if r.pop("saved", None) == _today()]
+  recipes = recipes[-_MAX_SNAPSHOTS:]  # Only as many as are kept.
   if not recipes:
     return
   deadline = time.monotonic() + 300
