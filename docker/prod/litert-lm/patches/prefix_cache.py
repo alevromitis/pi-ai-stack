@@ -20,16 +20,26 @@ ones are closed past LITERT_PREFIX_CACHE_SIZE conversations, and while the
 container's memory is over LITERT_PREFIX_CACHE_MAX_MB. The conversation in
 use is never closed for memory.
 
+New chats (system message(s) then one user message) don't prefill the
+system prompt: they clone a snapshot that holds only it, prefilled when the
+snapshot was created (patches/prefill_preface_option.py) and never sent to.
+One snapshot is kept, for the last system prompt, tools and settings seen.
+Clones of it continue exactly like a fresh conversation, with or without
+other clones alive (probes/clone_probe.py --snapshot-control, 2026-10-12);
+first token ~2-3 s instead of ~13 s.
+
 Env:
   LITERT_PREFIX_CACHE=0            disable (pure upstream behaviour)
   LITERT_PREFIX_CACHE_SIZE=3       most conversations kept alive
   LITERT_PREFIX_CACHE_MAX_MB=5120  close idle ones above this (cgroup memory)
+  LITERT_PREFIX_CACHE_SNAPSHOT=0   new chats prefill their system prompt
 """
 
 from __future__ import annotations
 
 import collections.abc
 import contextlib
+import copy
 import hashlib
 import json
 import os
@@ -43,6 +53,7 @@ from litert_lm import conversation as _conversation_module
 _ENABLED = os.environ.get("LITERT_PREFIX_CACHE", "1") != "0"
 _MAX_ENTRIES = max(1, int(os.environ.get("LITERT_PREFIX_CACHE_SIZE", "3")))
 _MAX_MB = int(os.environ.get("LITERT_PREFIX_CACHE_MAX_MB", "5120"))
+_SNAPSHOT = os.environ.get("LITERT_PREFIX_CACHE_SNAPSHOT", "1") != "0"
 # The container's own cgroup (v2, private cgroup namespace).
 _MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
@@ -297,6 +308,48 @@ def _match(
   return best
 
 
+# (engine, settings key, canonical system messages, conversation) or None.
+_snapshot: tuple[Any, str, list[tuple[Any, ...]], Any] | None = None
+
+
+def _clone(conv):
+  """litert_lm_conversation_clone: in the C API, not wrapped in Python."""
+  lib = conv._lib
+  ptr_type = lib.litert_lm_conversation_create.restype
+  lib.litert_lm_conversation_clone.restype = ptr_type
+  lib.litert_lm_conversation_clone.argtypes = [ptr_type]
+  ptr = lib.litert_lm_conversation_clone(conv._ptr)
+  if not ptr:
+    raise RuntimeError("litert_lm_conversation_clone failed")
+  twin = copy.copy(conv)  # Same Python-side settings, own native handle.
+  twin._ptr = ptr
+  twin._current_callback = None
+  return twin
+
+
+def _new_chat(engine, key, canonical, messages, translated_messages,
+              create_kwargs):
+  """A clone of the system-prompt snapshot for a new chat, or None."""
+  global _snapshot
+  if (not _SNAPSHOT or len(messages) < 2 or messages[-1].get("role") != "user"
+      or any(m.get("role") != "system" for m in messages[:-1])):
+    return None
+  system = canonical[:-1]
+  if _snapshot is not None and _snapshot[:3] != (engine, key, system):
+    _log("snapshot: replaced (other system prompt, tools or settings)")
+    _snapshot[3].close()
+    _snapshot = None
+  if _snapshot is None:
+    # With prefill_preface_option.py this argument means "prefill the
+    # preface on creation"; the filter keeps its default.
+    conv = engine.create_conversation(
+        messages=translated_messages[:-1],
+        filter_channel_content_from_kv_cache=True, **create_kwargs)
+    _snapshot = (engine, key, system, conv)
+    _log("snapshot: created")
+  return _clone(_snapshot[3])
+
+
 @contextlib.contextmanager
 def conversation(
     engine,
@@ -333,9 +386,18 @@ def conversation(
     _log(f"hit: reusing {n} messages, prefilling {len(new)} new")
   else:
     _evict(_MAX_ENTRIES - 1)  # Room for the new conversation's session.
-    conv = engine.create_conversation(
-        messages=translated_messages[:-1], **create_kwargs
-    )
+    conv = None
+    try:
+      conv = _new_chat(engine, key, canonical, messages, translated_messages,
+                       create_kwargs)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      _log(f"snapshot: failed ({e}); prefilling the system prompt")
+    if conv is not None:
+      _log("new chat: cloned the system-prompt snapshot")
+    else:
+      conv = engine.create_conversation(
+          messages=translated_messages[:-1], **create_kwargs
+      )
     send = prompt
 
   recorder = _RecordingConversation(conv)

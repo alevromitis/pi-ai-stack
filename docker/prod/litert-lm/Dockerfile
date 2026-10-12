@@ -58,6 +58,15 @@ RUN python3 /tmp/fix_mtp_rollback.py \
         "$(find /opt/venv -path '*/litert_lm/liblitert-lm.so')" \
     && rm /tmp/fix_mtp_rollback.py
 
+# Lets the prefix cache prefill a system prompt at conversation creation, so
+# new chats clone that snapshot instead of prefilling it (~13 s -> ~2-3 s to
+# the first token). patches/prefill_preface_option.py repurposes the unused
+# filter_channel_content_from_kv_cache setter, one instruction.
+COPY patches/prefill_preface_option.py /tmp/prefill_preface_option.py
+RUN python3 /tmp/prefill_preface_option.py \
+        "$(find /opt/venv -path '*/litert_lm/liblitert-lm.so')" \
+    && rm /tmp/prefill_preface_option.py
+
 # `serve` never passes enable_ynnpack to the Engine (only `run`/`benchmark`
 # have --enable-ynnpack, and config.json ignores the key), so patch it in.
 # Benchmarked 2026-10-07 (1024 prefill / 256 decode, 4 threads): gemma4-e2b

@@ -21,6 +21,19 @@ Prints one line per step and a final JSON summary line.
 --switching: only question 2, twice (MTP on, then off): two conversations
 alternating, clones of a snapshot that is never sent to again, and an
 original continued after its clone ran. Errors are logged, not fatal.
+
+--snapshot: new chats cloned from a system-prompt-only snapshot, twice (MTP
+on, then off). Needs the image's patches/prefill_preface_option.py, which
+makes create_conversation(filter_channel_content_from_kv_cache=True) prefill
+the preface at creation. Every chat is compared with a fresh conversation
+built the way serve builds a new chat.
+
+--snapshot-control: MTP on only. Separates the two causes the --snapshot run
+left open for clones that differed from a fresh conversation: the preface
+and the message prefilled in two steps instead of one (numerics), or other
+live clones of the same snapshot. For two prompts it compares a fresh
+conversation, one created with its preface prefilled and sent to directly,
+a clone with no other clone alive, and a clone while two others are alive.
 """
 
 from __future__ import annotations
@@ -48,6 +61,7 @@ U1 = "Write a short haiku about autumn leaves."
 U2 = "Now write one about spring rain."
 U3 = "And one about winter snow."
 UB = "Write a limerick about a cat who hates Mondays."
+UT = "What is the latest news about the James Webb Space Telescope?"
 MAX_OUT = 120
 
 summary: dict = {}
@@ -78,11 +92,14 @@ THINKING = openai_common.parse_thinking_config({"reasoning_effort": "none"}, mod
 CDC = litert_lm.ConstrainedDecodingConfig(enable=True, provider=None)
 
 
-def new(messages: list[dict]) -> litert_lm.Conversation:
+def new(messages: list[dict], prefill_preface: bool = False) -> litert_lm.Conversation:
+  # With patches/prefill_preface_option.py, this argument sets
+  # prefill_preface_on_init instead.
+  extra = {"filter_channel_content_from_kv_cache": True} if prefill_preface else {}
   return engine.create_conversation(
       messages=messages, tools=[occ._ProxyTool(TOOL)],
       automatic_tool_calling=False, sampler_config=SAMPLER,
-      thinking_config=THINKING, constrained_decoding_config=CDC)
+      thinking_config=THINKING, constrained_decoding_config=CDC, **extra)
 
 
 def tokens(conv) -> int:
@@ -95,12 +112,16 @@ def send(conv, message, max_out: int = MAX_OUT) -> dict:
   t = time.time()
   first = None
   parts = []
+  calls = []
   for chunk in conv.send_message_async(message, max_output_tokens=max_out):
     text = str(chunk)
-    if text and first is None:
+    if (text or chunk.tool_calls) and first is None:
       first = time.time() - t
     parts.append(text)
-  return {"text": "".join(parts).strip(), "ttft_s": round(first or -1, 2),
+    calls.extend(f"{tc.name}({json.dumps(tc.arguments, sort_keys=True)})"
+                 for tc in chunk.tool_calls)
+  return {"text": "".join(parts).strip(), "calls": calls,
+          "ttft_s": round(first or -1, 2),
           "total_s": round(time.time() - t, 2), "tokens": tokens(conv)}
 
 
@@ -183,8 +204,114 @@ def switching(label: str) -> None:
     conv.close()
 
 
-if "--switching" in sys.argv:
-  switching("mtp_on")
+def snapshot(label: str) -> None:
+  """New chats cloned from one system-prompt snapshot that is never sent to,
+  against fresh conversations (the preface prefilled with the first
+  message, as serve's misses do). Errors are logged, not fatal."""
+  c = new([sys_msg])
+  seq = [send(c, user(u)) for u in (U1, U2, U3)]
+  c.close()
+  ref = {}
+  for k, u in (("b", UB), ("t", UT)):
+    c = new([sys_msg])
+    ref[k] = send(c, user(u))
+    c.close()
+  log(f"{label}_refs", ttft_s=[seq[0]["ttft_s"], ref["b"]["ttft_s"], ref["t"]["ttft_s"]],
+      tokens=[s["tokens"] for s in seq], t_calls=ref["t"]["calls"],
+      t_text=ref["t"]["text"][:60])
+
+  def check(case: str, conv, message: str, expected: dict) -> None:
+    try:
+      r = send(conv, user(message))
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      log(f"{label}_{case}", error=str(e).splitlines()[-1][:200])
+      return
+    same = r["text"] == expected["text"] and r["calls"] == expected["calls"]
+    log(f"{label}_{case}", same=same, tokens=r["tokens"],
+        ref_tokens=expected["tokens"], ttft_s=r["ttft_s"],
+        ref_ttft_s=expected["ttft_s"],
+        **({} if same else {"calls": r["calls"], "ref_calls": expected["calls"],
+                            **first_difference(r["text"], expected["text"])}))
+
+  # Prefilled at creation, sent to directly: does the split (preface, then
+  # the message) tokenize and decode like one prefill?
+  t = time.time()
+  d = new([sys_msg], prefill_preface=True)
+  log(f"{label}_direct_create", create_s=round(time.time() - t, 2), tokens=tokens(d))
+  check("direct_turn1", d, U1, seq[0])
+  d.close()
+
+  t = time.time()
+  snap = new([sys_msg], prefill_preface=True)
+  log(f"{label}_snapshot", create_s=round(time.time() - t, 2),
+      tokens=tokens(snap), rss=rss_mb())
+  c1, s1 = clone(snap)
+  log(f"{label}_clone1", clone_s=s1, tokens=tokens(c1), rss=rss_mb())
+  check("clone1_turn1", c1, U1, seq[0])
+  c2, _ = clone(snap)
+  check("clone2_turn1", c2, UB, ref["b"])
+  check("clone1_turn2", c1, U2, seq[1])
+  c3, _ = clone(snap)
+  check("clone3_tool_turn1", c3, UT, ref["t"])
+  check("clone1_turn3", c1, U3, seq[2])
+  # The snapshot after its clones grew and closed: still a clean start?
+  for conv in (c1, c2, c3):
+    conv.close()
+  c4, _ = clone(snap)
+  check("clone4_after_close_turn1", c4, U1, seq[0])
+  c4.close()
+  snap.close()
+  log(f"{label}_end", rss=rss_mb())
+
+
+def snapshot_control() -> None:
+  out: dict = {}
+
+  def run(case: str, conv, message: str) -> None:
+    try:
+      out[case] = send(conv, user(message))
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      out[case] = {"text": "", "calls": [], "error": str(e).splitlines()[-1][:200]}
+    r = out[case]
+    log(case, text=r["text"][:70], calls=r["calls"], ttft_s=r.get("ttft_s"),
+        **({"error": r["error"]} if "error" in r else {}))
+
+  prompts = (("b", UB), ("t", UT))
+  for k, u in prompts:
+    c = new([sys_msg])
+    run(f"fresh_{k}", c, u)
+    c.close()
+    c = new([sys_msg], prefill_preface=True)
+    run(f"direct_{k}", c, u)
+    c.close()
+  snap = new([sys_msg], prefill_preface=True)
+  for k, u in prompts:
+    c, _ = clone(snap)
+    run(f"clone_alone_{k}", c, u)
+    c.close()
+  alive = []
+  c, _ = clone(snap)
+  run("sibling_u1", c, U1)
+  alive.append(c)
+  for k, u in prompts:
+    c, _ = clone(snap)
+    run(f"clone_with_siblings_{k}", c, u)
+    alive.append(c)
+  for c in alive + [snap]:
+    c.close()
+
+  def same(x: str, y: str) -> bool:
+    return (out[x]["text"], out[x]["calls"]) == (out[y]["text"], out[y]["calls"])
+
+  for k, _ in prompts:
+    log(f"verdict_{k}",
+        direct_vs_fresh=same(f"direct_{k}", f"fresh_{k}"),
+        clone_alone_vs_direct=same(f"clone_alone_{k}", f"direct_{k}"),
+        siblings_vs_clone_alone=same(f"clone_with_siblings_{k}", f"clone_alone_{k}"))
+
+
+def restart_without_mtp() -> None:
+  global engine, lib
   engine.close()
   server.litert_lm_engine = None
   _resolve = util.model.resolve_config_option
@@ -196,9 +323,20 @@ if "--switching" in sys.argv:
   lib = engine._lib
   lib.litert_lm_conversation_clone.restype = ptr_type
   lib.litert_lm_conversation_clone.argtypes = [ptr_type]
-  switching("mtp_off")
+
+
+if "--snapshot-control" in sys.argv:
+  snapshot_control()
   print("SUMMARY " + json.dumps(summary, ensure_ascii=False), flush=True)
   raise SystemExit(0)
+
+for flag, check_fn in (("--switching", switching), ("--snapshot", snapshot)):
+  if flag in sys.argv:
+    check_fn("mtp_on")
+    restart_without_mtp()
+    check_fn("mtp_off")
+    print("SUMMARY " + json.dumps(summary, ensure_ascii=False), flush=True)
+    raise SystemExit(0)
 
 # --- References: fresh conversations, one per history, as `serve` misses do.
 ref = {}
