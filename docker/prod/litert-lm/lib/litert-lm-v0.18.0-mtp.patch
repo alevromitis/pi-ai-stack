@@ -1,0 +1,181 @@
+LiteRT-LM v0.18.0: speculative decoding (MTP) fixes, applied by build.sh.
+
+1. runtime/core/tasks.cc: when a speculative step returns several tokens and
+   the stop token is not the last of them, roll back only the tokens after
+   it. Upstream rolled back the stop token too, so every speculative turn
+   ended without its stop token in the KV cache
+   (https://github.com/google-ai-edge/LiteRT-LM/issues/3439). Continuing such
+   a conversation (litert-lm's prefix cache does, after every tool call)
+   gave the model a malformed history; on the Pi it answered a calculator
+   result with an empty reply.
+2. runtime/executor/llm_litert_compiled_model_executor.{cc,h}: upstream
+   deaaa643 ("Re-prime the MTP drafter after any non-speculative step",
+   in main after v0.18.0), minus its tests and one unrelated reformatted
+   line. The drafter otherwise drafts from stale activations after a
+   rollback, restore or plain decode step.
+
+diff --git a/runtime/core/tasks.cc b/runtime/core/tasks.cc
+index 4ea8174f..2caf075d 100644
+--- a/runtime/core/tasks.cc
++++ b/runtime/core/tasks.cc
+@@ -334,8 +334,14 @@ class DecodeOneStep {
+       if (all_done) {
+         if (step != sequence_length - 1) {
+           // we are done before all the tokens are processed, so we need to
+-          // rollback the processed tokens in executor.
+-          int diff = sequence_length - step;
++          // rollback the processed tokens in executor. Only the tokens after
++          // the stop token go: the executor's step counts its pending input
++          // token, and the stop token must stay as that pending token so the
++          // next prefill commits it to the KV cache, as it does when it comes
++          // last (always, without speculative decoding). Rolling it back too
++          // left every speculative turn without its stop token
++          // (google-ai-edge/LiteRT-LM#3439).
++          int diff = sequence_length - step - 1;
+           ABSL_ASSIGN_OR_RETURN(int current_step, executor_.GetCurrentStep());
+           ABSL_RETURN_IF_ERROR(executor_.SetCurrentStep(current_step - diff));
+         }
+diff --git a/runtime/executor/llm_litert_compiled_model_executor.cc b/runtime/executor/llm_litert_compiled_model_executor.cc
+index 8a6536e0..0b443cd6 100644
+--- a/runtime/executor/llm_litert_compiled_model_executor.cc
++++ b/runtime/executor/llm_litert_compiled_model_executor.cc
+@@ -484,6 +484,7 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::RollBackProcessedTokens() {
+ 
+ absl::Status LlmLiteRtCompiledModelExecutorBase::PrepareFirstPrefillAfterDecode(
+     int token_index_to_reduce) {
++  mtp_primed_ = false;
+   if (!llm_context_->runtime_state().ran_decode && !force_prepare_needed_) {
+     return absl::OkStatus();
+   }
+@@ -1197,6 +1198,13 @@ absl::StatusOr<std::vector<std::vector<int>>>
+ LlmLiteRtCompiledModelExecutorBase::Decode(
+     const ExecutorDecodeParams& decode_params) {
+ 
++  // The drafter can only continue from its own last verified state if the
++  // previous step was a successful MTP round. Invalidate the flag up front so
++  // that every error exit below leaves it cleared; it is set again only after
++  // a fully committed speculative round.
++  const bool was_mtp_primed = mtp_primed_;
++  mtp_primed_ = false;
++
+   bool enable_mtp_drafter = false;
+   if (decode_params.GetEnableSpeculativeDecoding().has_value()) {
+     enable_mtp_drafter = *decode_params.GetEnableSpeculativeDecoding();
+@@ -1226,6 +1234,10 @@ LlmLiteRtCompiledModelExecutorBase::Decode(
+     LITERT_ASSIGN_OR_RETURN(output_tokens_vector,
+                             CopyFromTensorBuffer2D<int>(*output_tokens));
+   } else {
++    // Re-prime the drafter with a plain decode step unless the previous step
++    // was a successful MTP round.
++    const bool drafter_is_primed =
++        llm_context_->runtime_state().ran_decode && was_mtp_primed;
+     // MTP keeps an internal state of the last time it was called and will
+     // use those projected activations to kick off the next draft steps. As
+     // such, we need to do a single decode step on the first decode call after
+@@ -1240,8 +1252,7 @@ LlmLiteRtCompiledModelExecutorBase::Decode(
+                                  ? constrained_decoder->GetConstraint()
+                                  : nullptr;
+ 
+-    bool last_run_is_decode = llm_context_->runtime_state().ran_decode;
+-    if (last_run_is_decode) {
++    if (drafter_is_primed) {
+       ABSL_ASSIGN_OR_RETURN(auto step_and_token,
+                             GetTokenToDecode(ExecutorInputs()));
+       ABSL_RETURN_IF_ERROR(
+@@ -1340,11 +1351,13 @@ LlmLiteRtCompiledModelExecutorBase::Decode(
+       llm_context_->processed_context().processed_tokens().AddPendingInputToken(
+           pending_tokens));
+ 
++  mtp_primed_ = enable_mtp_drafter;
+   return output_tokens_vector;
+ }
+ 
+ absl::Status LlmLiteRtCompiledModelExecutorBase::Decode(
+     const ExecutorInputs& inputs, TensorBuffer& output_logits) {
++  mtp_primed_ = false;
+   ABSL_RETURN_IF_ERROR(PrepareFirstDecode());
+   ABSL_ASSIGN_OR_RETURN(auto step_and_token, GetTokenToDecode(inputs));
+   ABSL_RETURN_IF_ERROR(DecodeInternal(step_and_token.token, output_logits));
+@@ -1365,6 +1378,7 @@ absl::StatusOr<TensorBuffer> LlmLiteRtCompiledModelExecutorBase::DecodeLogits(
+       decode_output_buffers_[signatures_.output_logits].Duplicate());
+ 
+   bool last_run_is_decode = llm_context_->runtime_state().ran_decode;
++  mtp_primed_ = false;
+   ABSL_RETURN_IF_ERROR(PrepareFirstDecode());
+   ABSL_ASSIGN_OR_RETURN(auto step_and_token, GetTokenToDecode(inputs));
+   ABSL_RETURN_IF_ERROR(DecodeInternal(step_and_token.token, output_logits));
+@@ -1407,8 +1421,7 @@ LlmLiteRtCompiledModelExecutorBase::GetPrefillSignatureKey() const {
+     LITERT_ASSIGN_OR_RETURN(auto sig, model_.GetSignature(i));
+     absl::string_view key = sig.Key();
+     if (absl::StartsWith(key, kPrefillSignatureRunner) &&
+-        (selected.empty() ||
+-         absl::c_find(selected, key) != selected.end())) {
++        (selected.empty() || absl::c_find(selected, key) != selected.end())) {
+       prefill_signature_key = key;
+       break;
+     }
+@@ -1433,6 +1446,7 @@ LlmLiteRtCompiledModelExecutorBase::CloneState() const {
+ 
+ absl::Status LlmLiteRtCompiledModelExecutorBase::RestoreState(
+     std::unique_ptr<StateInterface> state) {
++  mtp_primed_ = false;
+   if (state == nullptr) {
+     return absl::OkStatus();
+   }
+@@ -1484,6 +1498,7 @@ LlmLiteRtCompiledModelExecutorBase::CloneContext() const {
+ absl::Status LlmLiteRtCompiledModelExecutorBase::RestoreContext(
+     std::unique_ptr<LlmContext> context_data) {
+   llm_context_ = std::move(context_data);
++  mtp_primed_ = false;
+ 
+   // We can keep our kv cache buffers if this is the first step. This lets us
+   // restore from LlmContexts at step 0 with an empty kv cache.
+@@ -1668,6 +1683,8 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::SetCurrentStep(int new_step) {
+   if (old_step == new_step) {
+     return absl::OkStatus();
+   }
++  // Moving the step (e.g. rewinding) invalidates the MTP drafter state.
++  mtp_primed_ = false;
+ 
+   int max_step = old_step;
+   ABSL_ASSIGN_OR_RETURN(auto processed_tokens, GetProcessedTokens());
+@@ -1695,6 +1712,7 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::SetCurrentStep(int new_step) {
+ 
+ absl::Status LlmLiteRtCompiledModelExecutorBase::Reset() {
+   llm_context_->runtime_state().current_step = 0;
++  mtp_primed_ = false;
+   return absl::OkStatus();
+ }
+ 
+diff --git a/runtime/executor/llm_litert_compiled_model_executor.h b/runtime/executor/llm_litert_compiled_model_executor.h
+index 4c358c94..39329f96 100644
+--- a/runtime/executor/llm_litert_compiled_model_executor.h
++++ b/runtime/executor/llm_litert_compiled_model_executor.h
+@@ -171,6 +171,13 @@ class LlmLiteRtCompiledModelExecutorBase : public LlmExecutor {
+ 
+   using LogitsDataType = ActivationDataType;
+ 
++  // For testing only: Returns whether the MTP drafter holds valid state for the
++  // next speculative round.
++  bool mtp_primed_for_testing() const { return mtp_primed_; }
++  // For testing only: Overrides the primed state so that tests can check that
++  // non-speculative steps invalidate it.
++  void set_mtp_primed_for_testing(bool primed) { mtp_primed_ = primed; }
++
+   const ProcessedTokens& processed_tokens_for_testing() const {
+     return llm_context_->processed_context().processed_tokens();
+   }
+@@ -442,6 +449,13 @@ class LlmLiteRtCompiledModelExecutorBase : public LlmExecutor {
+   // Pointer to model resources for lazy loading of components (e.g. MTP
+   // drafter).
+   ModelResources* resources_ = nullptr;
++
++  // Whether the MTP drafter's internal state (the verifier activations of the
++  // last verified token) is valid for the next speculative round. It is only
++  // true right after a successful MTP round; any plain decode step, prefill,
++  // state/context restore, step change or failed round invalidates it, and the
++  // next MTP round then goes through the priming path.
++  bool mtp_primed_ = false;
+ };
+ 
+ // The static executor for the prefill-decode compiled model.

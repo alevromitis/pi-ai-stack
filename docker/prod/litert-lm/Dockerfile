@@ -48,6 +48,21 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir litert-lm==0.18.0
 
+# The wheel's C library, replaced by one built from the v0.18.0 tag with
+# lib/litert-lm-v0.18.0-mtp.patch: upstream drops the stop token of every
+# speculative (MTP) turn from the KV cache, and the prefix cache continues
+# those turns, so with speculative decoding on the model answered tool
+# results with empty replies. Build it first, on the Pi: lib/build.sh
+# (~1.5-3 h) writes lib/out/, which is not committed. The open-source build
+# loads the LiteRT runtime (with YNNPACK) and Google's closed-source
+# constraint provider from two more libraries, installed next to it.
+COPY lib/out/liblitert-lm.so lib/out/libLiteRt.so \
+     lib/out/libGemmaModelConstraintProvider.so /tmp/litert-lib/
+RUN d="$(dirname "$(find /opt/venv -path '*/litert_lm/liblitert-lm.so')")" \
+    && install -m 0755 /tmp/litert-lib/*.so "$d/" \
+    && rm -rf /tmp/litert-lib \
+    && /opt/venv/bin/python -c "from litert_lm._ffi import _get_lib; _get_lib()"
+
 # `serve` never passes enable_ynnpack to the Engine (only `run`/`benchmark`
 # have --enable-ynnpack, and config.json ignores the key), so patch it in.
 # Benchmarked 2026-10-07 (1024 prefill / 256 decode, 4 threads): gemma4-e2b
