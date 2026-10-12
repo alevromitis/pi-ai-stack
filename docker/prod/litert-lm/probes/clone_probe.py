@@ -135,6 +135,16 @@ c = new([sys_msg, user(U1), assistant(ref["1"]["text"]), user(U2),
 c = new([sys_msg]); ref["b"] = send(c, user(UB)); c.close()
 for k, v in ref.items():
   log(f"ref{k}", ttft_s=v["ttft_s"], tokens=v["tokens"], text=v["text"][:60])
+# The references rebuild each history from text, and a reply re-tokenizes
+# slightly differently from how it was generated. So a conversation that
+# continues its own KV can drift from them after a few turns; this control
+# is one conversation sending U1, U2, U3 with nothing else in between.
+c = new([sys_msg])
+seq = [send(c, user(u)) for u in (U1, U2, U3)]
+c.close()
+log("sequential_control", same_as_refs=[s["text"] == ref[k]["text"]
+                                        for s, k in zip(seq, "123")],
+    tokens=[s["tokens"] for s in seq])
 
 # --- Q3a: is the system prompt prefilled at creation?
 c = new([sys_msg])
@@ -169,7 +179,11 @@ log("second_live", same_as_ref=rb["text"] == ref["b"]["text"],
     ttft_s=rb["ttft_s"], rss=rss_mb())
 r = send(a2c, user(U3))
 log("switch_back", same_as_ref=r["text"] == ref["3"]["text"],
+    same_as_sequential=r["text"] == seq[2]["text"],
     ttft_s=r["ttft_s"], ref_ttft_s=ref["3"]["ttft_s"], tokens=r["tokens"])
+r = send(a, user(U3))
+log("original_switch_back", same_as_sequential=r["text"] == seq[2]["text"],
+    ttft_s=r["ttft_s"], tokens=r["tokens"])
 extra = []
 for _ in range(3):
   extra.append(clone(a2c)[0])
