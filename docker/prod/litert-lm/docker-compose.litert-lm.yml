@@ -57,6 +57,13 @@ services:
     mem_reservation: "${LITERT_MEM_RESERVATION:-4g}"
     # Equal to mem_limit = no extra swap allowed for this container at all.
     memswap_limit: "${LITERT_MEM_LIMIT:-7g}"
+    # First claim on the CPU when other containers are busy. Docker maps
+    # shares to cgroup v2 cpu.weight as 1 + (shares-2)*9999/262142, so this is
+    # the maximum weight, 10000; every other container runs at the default
+    # 100. Decode is 4 threads in lockstep, so any core lost to a neighbour
+    # stalls the whole step. With the Pi's normal background load
+    # (2026-10-12, 16k context): prefill 60 -> 75 tok/s, decode 6.3 -> 7.4.
+    cpu_shares: 262144
 
   # Embeddings for LibreChat's rag_api (../librechat). A second server, not a
   # second model on litert-lm-1: `serve` is a single-threaded HTTPServer, so
