@@ -1,9 +1,9 @@
 # Plan: cloned conversations for the prefix cache
 
-Status: **probe run four times on 2026-10-12; nothing changed in prod
-yet.** Live conversations can alternate exactly, with MTP on or off.
-Clones are exact and fast, as long as the conversation they were cloned
-from is treated as a frozen snapshot (see Results).
+Status: **step 1 deployed 2026-10-12 (7f3ffa7, 44fbd57); step 2 open.**
+Live conversations alternate exactly, MTP on or off, and the prefix cache
+now keeps several. Clones are exact and fast, as long as the conversation
+they were cloned from is treated as a frozen snapshot (see Results).
 
 ## Why
 
@@ -131,11 +131,18 @@ messages with nothing in between.
 
 ## Decision
 
-1. **Now: several live conversations** in `prefix_cache.py`, no clones
-   (case a). Returning to a recent chat, or a side request with other
-   settings, no longer evicts the chat being used. RAM is the limit: each
-   live conversation's KV grows with its length, so the cache is capped by
-   conversations and by tokens.
+1. **Done: several live conversations** in `prefix_cache.py`, no clones
+   (case a).
+   - **Caps:** up to `LITERT_PREFIX_CACHE_SIZE` (3); idle ones are closed,
+     oldest first, while the container is over `LITERT_PREFIX_CACHE_MAX_MB`
+     (5120).
+   - **Live test** (three interleaved chats, pi-chat prompt and a tool):
+     going back to a chat after another one ran is a hit, first token after
+     **4.0 s and 3.8 s instead of ~17 s**.
+   - **Memory:** container 2.3 GB with the engine, 3.9 GB with one chat,
+     4.8–5.0 GB with three. Closing a ~1.2k-token chat frees ~145 MB; the
+     rest is buffers the engine keeps. With a 4,000 MB test cap it held at
+     3.86–3.98 GB.
 2. **Later, the big one: new chats from a system-prompt snapshot** (case b).
    That needs the preface prefilled at creation (`prefill_preface_on_init`),
    which 0.18.0's C API can't set: a binary patch like
