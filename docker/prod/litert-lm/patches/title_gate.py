@@ -51,6 +51,7 @@ _FILLER = re.compile(
     r"can you|could you|would you|will you|"
     r"i (?:want|need|would like) to|i['’]d like to|"
     r"help me(?: to)?|tell me(?: about)?|give me|show me|explain|"
+    r"write|create|make|generate|draft|compose|"
     r"what(?: is|['’]s| are| was| were)|who(?: is|['’]s| was| were)|"
     r"do you know)\b[\s,:]*",
     re.IGNORECASE,
