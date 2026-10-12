@@ -1,6 +1,6 @@
 # Plan: cloned conversations for the prefix cache
 
-Status: **step 1 deployed 2026-10-12 (7f3ffa7, 44fbd57); step 2 open.**
+Status: **both steps deployed 2026-10-12** (step 1: 7f3ffa7, 44fbd57; step 2: e1122d4).
 Live conversations alternate exactly, MTP on or off, and the prefix cache
 now keeps several. Clones are exact and fast, as long as the conversation
 they were cloned from is treated as a frozen snapshot (see Results).
@@ -143,8 +143,21 @@ messages with nothing in between.
      4.8–5.0 GB with three. Closing a ~1.2k-token chat frees ~145 MB; the
      rest is buffers the engine keeps. With a 4,000 MB test cap it held at
      3.86–3.98 GB.
-2. **Later, the big one: new chats from a system-prompt snapshot** (case b).
-   That needs the preface prefilled at creation (`prefill_preface_on_init`),
-   which 0.18.0's C API can't set: a binary patch like
-   `fix_mtp_rollback.py`, or a newer release. It would cut a new chat's
-   first token from ~13 s to ~3 s.
+2. **Done: new chats from a system-prompt snapshot** (e1122d4).
+   - **Patch:** `patches/prefill_preface_option.py` retargets one store in
+     `litert_lm_conversation_create`, so the unused
+     `filter_channel_content_from_kv_cache` setter sets
+     `prefill_preface_on_init` instead.
+   - **Cache:** `prefix_cache.py` keeps one snapshot (system prompt, tools,
+     settings), never sent to, and clones it for each `[system, user]`
+     request (`LITERT_PREFIX_CACHE_SNAPSHOT`, default 1).
+   - **`--snapshot` run:** preface prefilled at creation (881 tokens); clones
+     identical for a 3-turn chat and after other clones closed, MTP on and
+     off. Three clones made while others were alive differed by a near-tie
+     word or search query.
+   - **`--snapshot-control` run:** fresh, prefilled-and-direct, lone clone
+     and clone with two others alive were all identical for both prompts.
+     The earlier differences did not reproduce.
+   - **Live:** new chats' first token 4.8–5.0 s instead of ~13–17 s; the
+     first after a restart 26 s (creates the snapshot). Rollback image
+     `litert-lm-rpi5:pre-e1122d4`.
