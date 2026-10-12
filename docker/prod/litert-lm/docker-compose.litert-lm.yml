@@ -33,8 +33,9 @@ services:
       # tokens and the model checks several per step (config.json's
       # `speculative_decoding`). Decode +37-73% on the Pi (2026-10-12, real
       # chats), prefill unchanged. The drafter and verifier are greedy, so the
-      # request's temperature/top_p/top_k are ignored.
-      LITERT_SPECULATIVE_DECODING: "${LITERT_SPECULATIVE_DECODING:-false}"
+      # request's temperature/top_p/top_k are ignored. Relies on the image's
+      # patches/fix_mtp_rollback.py (upstream #3439).
+      LITERT_SPECULATIVE_DECODING: "${LITERT_SPECULATIVE_DECODING:-true}"
       # 1 = reuse the last conversation's KV cache (patches/prefix_cache.py),
       # 0 = upstream behaviour (full prefill on every request).
       LITERT_PREFIX_CACHE: "${LITERT_PREFIX_CACHE:-1}"

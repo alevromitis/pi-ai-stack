@@ -1,0 +1,32 @@
+LiteRT-LM v0.18.0, runtime/core/tasks.cc: when a speculative (MTP) step
+returns several tokens and the stop token is not the last of them, roll back
+only the tokens after it. Upstream rolls back the stop token too, so every
+such turn ends without its stop token in the KV cache
+(https://github.com/google-ai-edge/LiteRT-LM/issues/3439).
+
+Reference only, for upstream: the image applies the same fix to the PyPI
+wheel's own library, one instruction (fix_mtp_rollback.py). A source build
+can't use Google's prebuilt tool-call constraint provider, which the wheel's
+library has built in.
+
+diff --git a/runtime/core/tasks.cc b/runtime/core/tasks.cc
+index 4ea8174f..2caf075d 100644
+--- a/runtime/core/tasks.cc
++++ b/runtime/core/tasks.cc
+@@ -334,8 +334,14 @@ class DecodeOneStep {
+       if (all_done) {
+         if (step != sequence_length - 1) {
+           // we are done before all the tokens are processed, so we need to
+-          // rollback the processed tokens in executor.
+-          int diff = sequence_length - step;
++          // rollback the processed tokens in executor. Only the tokens after
++          // the stop token go: the executor's step counts its pending input
++          // token, and the stop token must stay as that pending token so the
++          // next prefill commits it to the KV cache, as it does when it comes
++          // last (always, without speculative decoding). Rolling it back too
++          // left every speculative turn without its stop token
++          // (google-ai-edge/LiteRT-LM#3439).
++          int diff = sequence_length - step - 1;
+           ABSL_ASSIGN_OR_RETURN(int current_step, executor_.GetCurrentStep());
+           ABSL_RETURN_IF_ERROR(executor_.SetCurrentStep(current_step - diff));
+         }
