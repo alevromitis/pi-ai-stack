@@ -1,9 +1,9 @@
 # Plan: cloned conversations for the prefix cache
 
-Status: **probe run three times on 2026-10-12; nothing changed in prod.**
-Clones are exact and fast, but with MTP on a clone and its original are
-not independent (see Results). A fourth run (`--switching`) decides the
-design.
+Status: **probe run four times on 2026-10-12; nothing changed in prod
+yet.** Live conversations can alternate exactly, with MTP on or off.
+Clones are exact and fast, as long as the conversation they were cloned
+from is treated as a frozen snapshot (see Results).
 
 ## Why
 
@@ -108,18 +108,36 @@ rebuild from text, so they have this too; it isn't a regression.
 - **New chats are still blocked,** as expected: there is no
   system-prompt-only state to clone.
 
-## Next run
+### Fourth run: `--switching`
 
-`./run-clone-probe.sh <system prompt> --switching`, about 5 minutes with
-litert-lm-1 stopped. It runs MTP on, then off, logging errors instead of
-stopping:
-- **(a) Two conversations alternating, no clones.** If exact with MTP on: a
-  small LRU of live conversations is safe today, Python only.
-- **(b) Clones of a snapshot that is never sent to again.** If exact with
-  MTP on: edits, regenerations and side requests can branch from snapshots.
-- **(c) The original after its clone ran,** which failed above. Expected
-  to pass with MTP off. If only MTP off is safe, it's a trade-off: MTP's
-  +37–73% decode against the multi-conversation cache.
+Each case is compared with one conversation that sends the same three
+messages with nothing in between.
 
-The shared draft-model state is worth an upstream issue, after the run
-pins it down.
+| Case | MTP on | MTP off |
+|---|---|---|
+| (a) Two conversations alternating, no clones, to turn 3 | exact | exact |
+| (b) Two clones of a snapshot that is never sent to again, to turn 3 | exact | exact |
+| (c) The original sent one more message after its clones ran | exact | exact |
+
+**Reading runs 2–4 together:**
+- **Alternation is safe.**
+- **Clones of a frozen snapshot are safe.**
+- **The only failure** was an original that kept going after its clone had
+  run. The draft model broke when the original grew to ~990 tokens (turn
+  3). One message (turn 2, ~960 tokens) was fine.
+- **Likely cause:** that fits the draft model's KV buffers moving to the
+  clone, so the original can't grow them. Upstream issue material:
+  `Conversation::Clone` with MTP.
+
+## Decision
+
+1. **Now: several live conversations** in `prefix_cache.py`, no clones
+   (case a). Returning to a recent chat, or a side request with other
+   settings, no longer evicts the chat being used. RAM is the limit: each
+   live conversation's KV grows with its length, so the cache is capped by
+   conversations and by tokens.
+2. **Later, the big one: new chats from a system-prompt snapshot** (case b).
+   That needs the preface prefilled at creation (`prefill_preface_on_init`),
+   which 0.18.0's C API can't set: a binary patch like
+   `fix_mtp_rollback.py`, or a newer release. It would cut a new chat's
+   first token from ~13 s to ~3 s.

@@ -72,8 +72,8 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
     && grep -q 'enable_ynnpack=True' "$f"
 
 # Prefix (KV) cache: upstream re-prefills the whole chat on every request;
-# patches/prefix_cache.py keeps the last conversation and prefills only the
-# new messages. Also honours `max_tokens`. patches/apply_reasoning.py streams
+# patches/prefix_cache.py keeps the last few conversations and prefills only
+# the new messages. Also honours `max_tokens`. patches/apply_reasoning.py streams
 # Gemma's thinking as reasoning_content (upstream generates and discards it).
 # patches/memory_gate.py answers LibreChat's memory agent without the engine
 # unless the user asked to remember or forget something.

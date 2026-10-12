@@ -6,10 +6,10 @@ the Dockerfile and wired in by apply_memory_gate.py.
 With `memory.agent.enabled` in librechat.yaml, LibreChat sends a second
 request with every chat message: the last few messages plus two tools,
 set_memory and delete_memory, and instructions to call them only when the
-user asks to remember or forget something. `serve` is single-threaded and
-the prefix cache (prefix_cache.py) holds one conversation, so that request
-would queue next to the reply and evict the chat's KV cache, making every
-reply re-prefill the whole chat.
+user asks to remember or forget something. `serve` is single-threaded, so
+that request queues next to the reply, and it takes one of the prefix
+cache's few conversation slots (prefix_cache.py; until 2026-10-12 the only
+one, so every reply re-prefilled the whole chat).
 
 When a request's tools are exactly those two and the newest user turn names
 no memory action, this answers "no tool call" at once, without touching the

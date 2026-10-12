@@ -231,10 +231,10 @@ memory:
   # Small, since every new chat prefills them.
   tokenLimit: 1000
   # The memory agent: with each user message, a second LiteRT-LM request
-  # with set_memory/delete_memory tools. A real run evicts litert-lm-1's
-  # prefix cache, so the reply re-prefills the whole chat; litert-lm's
-  # memory gate (LITERT_MEMORY_GATE) answers it without the model unless the
-  # newest message asks to remember or forget something. Opt-in in v0.8.7.
+  # with set_memory/delete_memory tools. A real run costs a model call and
+  # takes one of litert-lm-1's prefix-cache slots; litert-lm's memory gate
+  # (LITERT_MEMORY_GATE) answers it without the model unless the newest
+  # message asks to remember or forget something. Opt-in in v0.8.7.
   agent:
     enabled: true
     provider: 'LiteRT-LM'

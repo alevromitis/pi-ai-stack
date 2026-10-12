@@ -5,16 +5,16 @@ the Dockerfile and wired in by apply_title_gate.py.
 
 With `titleConvo: true`, LibreChat sends one more request after the first
 reply of every chat: a single user message asking for a 5-word title of
-"User: <first message>\nAI: <reply>". The prefix cache (prefix_cache.py)
-holds one conversation, and that request has other settings (no tools), so
-it evicted the chat: the second message of every chat then re-prefilled
+"User: <first message>\nAI: <reply>". When the prefix cache
+(prefix_cache.py) held one conversation, that request (other settings, no
+tools) evicted the chat, and the second message of every chat re-prefilled
 the system prompt and the whole first exchange (about 20-35 s on the Pi).
+With several cached it would still take a slot and ~4 s of the Pi's CPU.
 
 This answers it at once with a title cut from the user's first message,
-without touching the engine or the cache, so the second message is a
-prefix-cache hit. Only LibreChat's default completion title prompt is
-recognised (`titlePrompt` unset in librechat.yaml); anything else is served
-normally.
+without touching the engine or the cache. Only LibreChat's default
+completion title prompt is recognised (`titlePrompt` unset in
+librechat.yaml); anything else is served normally.
 
 Env:
   LITERT_TITLE_GATE=0   disable (the model writes titles, evicting the cache)

@@ -5,18 +5,24 @@ the Dockerfile and wired in by apply_prefix_cache.py.
 
 Upstream builds a fresh Conversation for every request, so the system
 prompt, tool schemas and the whole history are prefilled again on every
-turn - and on every tool round of an agent turn. Here the last Conversation
-stays alive. When a request's messages are that conversation's history plus
-the reply it generated, followed only by new user/tool messages, just those
-new messages are sent and only they are prefilled.
+turn - and on every tool round of an agent turn. Here the last few
+Conversations stay alive. When a request's messages are one of them's
+history plus the reply it generated, followed only by new user/tool
+messages, just those new messages are sent and only they are prefilled.
 
-Anything else (edited or regenerated messages, other chats, title requests,
-changed tools or sampler settings) is a miss: the cached conversation is
-closed first, so the engine never holds two sessions, and the request is
-served exactly like upstream.
+Anything else (edited or regenerated messages, a chat not cached, changed
+tools or sampler settings) is a miss, served exactly like upstream; the
+cached conversations stay for the requests that do extend them. Several
+live conversations alternate exactly on this engine, MTP on or off
+(probes/clone_probe.py --switching, 2026-10-12). Each holds its KV cache in
+RAM, so the least recently used ones are closed past
+LITERT_PREFIX_CACHE_SIZE conversations or LITERT_PREFIX_CACHE_IDLE_TOKENS
+tokens in the ones not in use.
 
 Env:
-  LITERT_PREFIX_CACHE=0   disable (pure upstream behaviour)
+  LITERT_PREFIX_CACHE=0                 disable (pure upstream behaviour)
+  LITERT_PREFIX_CACHE_SIZE=3            most conversations kept alive
+  LITERT_PREFIX_CACHE_IDLE_TOKENS=8192  most tokens held by idle ones
 """
 
 from __future__ import annotations
@@ -34,6 +40,8 @@ import litert_lm
 from litert_lm import conversation as _conversation_module
 
 _ENABLED = os.environ.get("LITERT_PREFIX_CACHE", "1") != "0"
+_MAX_ENTRIES = max(1, int(os.environ.get("LITERT_PREFIX_CACHE_SIZE", "3")))
+_MAX_IDLE_TOKENS = int(os.environ.get("LITERT_PREFIX_CACHE_IDLE_TOKENS", "8192"))
 _REUSABLE_ROLES = ("user", "tool")
 
 _original_normalize_message = _conversation_module.normalize_message
@@ -196,15 +204,60 @@ class _Entry:
     self.key = key
     self.history = history
 
+  def tokens(self) -> int:
+    count = self.conv.token_count  # A property in litert_lm 0.18.0.
+    return count() if callable(count) else count
 
-_entry: _Entry | None = None
+
+# Cached conversations, least recently used first. A request owns the one it
+# continues (or creates) until it completes cleanly.
+_entries: list[_Entry] = []
 
 
-def _drop() -> None:
-  global _entry
-  if _entry is not None:
-    _entry.conv.close()
-    _entry = None
+def _close_oldest(why: str) -> None:
+  old = _entries.pop(0)
+  _log(f"evict: a {len(old.history)}-message conversation ({why})")
+  old.conv.close()
+
+
+def _evict(max_entries: int) -> None:
+  """Closes least recently used conversations past the caps.
+
+  The token cap counts every cached conversation but the most recent one:
+  the chat in use, or the one last used when a miss is about to create a
+  new conversation.
+  """
+  while len(_entries) > max_entries:
+    _close_oldest(f"over {max_entries} cached")
+  while (
+      len(_entries) > 1
+      and sum(e.tokens() for e in _entries[:-1]) > _MAX_IDLE_TOKENS
+  ):
+    _close_oldest(f"over {_MAX_IDLE_TOKENS} idle tokens")
+
+
+def _extends(
+    e: _Entry,
+    key: str,
+    canonical: list[tuple[Any, ...]],
+    messages: list[Any],
+) -> tuple[int | None, str]:
+  """(messages it holds, "") if the request continues e, else (None, why)."""
+  if e.key != key:
+    return None, "tools/model/sampler settings changed"
+  n = len(e.history)
+  if len(canonical) <= n or canonical[:n] != e.history:
+    diverge = next(
+        (i for i, (a, b) in enumerate(zip(canonical, e.history)) if a != b),
+        min(len(canonical), n),
+    )
+    return None, f"history differs at message {diverge} (cached {n})"
+  new_roles = {m.get("role") for m in messages[n:]}
+  if not new_roles <= set(_REUSABLE_ROLES) or (
+      "user" in new_roles and len(messages) - n > 1
+  ):
+    return None, f"new messages have roles {sorted(new_roles)}"
+  return n, ""
 
 
 def _match(
@@ -212,32 +265,31 @@ def _match(
     key: str,
     canonical: list[tuple[Any, ...]],
     messages: list[Any],
-) -> int | None:
-  """Returns how many leading messages the cached conversation holds."""
-  e = _entry
-  if e is None:
+) -> _Entry | None:
+  """The cached conversation the request continues, taken out of the cache.
+
+  If several do, the one holding the most messages.
+  """
+  stale = [e for e in _entries if e.engine is not engine]
+  if stale:
+    _log(f"drop: engine was re-initialized ({len(stale)} cached)")
+    for e in stale:
+      _entries.remove(e)
+      e.conv.close()
+  best, reasons = None, []
+  for e in reversed(_entries):  # Most recent first.
+    n, why = _extends(e, key, canonical, messages)
+    if n is None:
+      reasons.append((e.key != key, why))  # Same settings sort first.
+    elif best is None or n > len(best.history):
+      best = e
+  if best is None:
+    if reasons:
+      others = f" (+{len(reasons) - 1} other cached)" if len(reasons) > 1 else ""
+      _log(f"miss: {sorted(reasons, key=lambda r: r[0])[0][1]}{others}")
     return None
-  if e.engine is not engine:
-    _log("miss: engine was re-initialized")
-    return None
-  if e.key != key:
-    _log("miss: tools/model/sampler settings changed")
-    return None
-  n = len(e.history)
-  if len(canonical) <= n or canonical[:n] != e.history:
-    diverge = next(
-        (i for i, (a, b) in enumerate(zip(canonical, e.history)) if a != b),
-        min(len(canonical), n),
-    )
-    _log(f"miss: history differs at message {diverge} (cached {n})")
-    return None
-  new_roles = {m.get("role") for m in messages[n:]}
-  if not new_roles <= set(_REUSABLE_ROLES) or (
-      "user" in new_roles and len(messages) - n > 1
-  ):
-    _log(f"miss: new messages have roles {sorted(new_roles)}")
-    return None
-  return n
+  _entries.remove(best)
+  return best
 
 
 @contextlib.contextmanager
@@ -254,7 +306,6 @@ def conversation(
 
   Drop-in for `engine.create_conversation(messages=translated[:-1], ...)`.
   """
-  global _entry
   messages = body.get("messages")
   if not _ENABLED or not isinstance(messages, list) or not messages:
     with engine.create_conversation(
@@ -268,19 +319,19 @@ def conversation(
   key = _config_key(body)
   canonical = [_canonical_message(m, name_map) for m in messages]
 
-  n = _match(engine, key, canonical, messages)
-  if n is not None:
-    conv = _entry.conv
+  entry = _match(engine, key, canonical, messages)
+  if entry is not None:
+    conv = entry.conv
+    n = len(entry.history)
     new = translated_messages[n:]
     send = new[0] if len(new) == 1 else new
     _log(f"hit: reusing {n} messages, prefilling {len(new)} new")
   else:
-    _drop()
+    _evict(_MAX_ENTRIES - 1)  # Room for the new conversation's session.
     conv = engine.create_conversation(
         messages=translated_messages[:-1], **create_kwargs
     )
     send = prompt
-  _entry = None  # Owned by this request until it completes cleanly.
 
   recorder = _RecordingConversation(conv)
   try:
@@ -292,9 +343,10 @@ def conversation(
   # _stream_response swallows errors, so only a generator that ran to its
   # end without cancellation is known to have a KV cache matching `history`.
   # A reply cut off at the token limit also ends "normally"; the next send on
-  # it fails and the entry is dropped then.
+  # it fails and the conversation is closed then.
   if recorder.completed and not recorder.cancelled:
     reply = _canonical_message(recorder.reply(), {})
-    _entry = _Entry(engine, conv, key, canonical + [reply])
+    _entries.append(_Entry(engine, conv, key, canonical + [reply]))
+    _evict(_MAX_ENTRIES)
   else:
     conv.close()
