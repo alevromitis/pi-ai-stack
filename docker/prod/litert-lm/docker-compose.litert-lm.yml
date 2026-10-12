@@ -53,7 +53,12 @@ services:
       # Playwright (2026-10-12). This many are kept, one per system prompt,
       # tools and settings (preset), so switching between them doesn't
       # prefill again; 1 = only the last, 0 = each new chat prefills.
+      # Their requests are saved in the registry volume
+      # (prefix-snapshots.json: system prompts with saved memories, tool
+      # schemas) and rebuilt at start if saved the same UTC day: first token
+      # after a restart ~2 s instead of 36 s. Empty file path = not saved.
       LITERT_PREFIX_CACHE_SNAPSHOT: "${LITERT_PREFIX_CACHE_SNAPSHOT:-3}"
+      LITERT_PREFIX_CACHE_WARM_FILE: "${LITERT_PREFIX_CACHE_WARM_FILE-/root/.litert-lm/prefix-snapshots.json}"
       # 1 = answer LibreChat's memory agent without the model unless the
       # user's message asks to remember/forget (patches/memory_gate.py),
       # 0 = every memory request runs the model and evicts the prefix cache.

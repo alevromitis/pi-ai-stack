@@ -29,7 +29,19 @@ prefill the whole preface again (2026-10-12, Pi: 17 s with no tools, 29 s
 with Wikipedia, web search and calculator, 94 s with Playwright added).
 Clones of it continue exactly like a fresh conversation, with or without
 other clones alive (probes/clone_probe.py --snapshot-control, 2026-10-12);
-first token ~2-3 s instead of ~13 s. With MTP on, a clone (or a chat
+first token ~2-3 s instead of ~13 s.
+
+A restart loses them all, and the first request then also waits for the
+engine to load and its first decode to warm up: 36 s to the first token
+with search and calculator on (2026-10-12). So each snapshot's request
+(system messages, tools, settings) is saved to LITERT_PREFIX_CACHE_WARM_FILE,
+and when the server starts it sends itself one-token requests for those
+saved the same UTC day (LibreChat's {{current_date}} is UTC too; an older
+system prompt would not be asked for again). Real requests queue behind
+them, as they would behind the work they replace. The file holds the
+system prompts, saved memories included.
+
+With MTP on, a clone (or a chat
 continuing one) sometimes faults in the drafter before its first token; the
 request is then retried on a new clone or a fresh conversation
 (_ENGINE_FAULTS).
@@ -40,6 +52,8 @@ Env:
   LITERT_PREFIX_CACHE_MAX_MB=5120  close idle ones above this (cgroup memory)
   LITERT_PREFIX_CACHE_SNAPSHOT=3   snapshots kept; 0 = new chats prefill
                                    their system prompt
+  LITERT_PREFIX_CACHE_WARM_FILE=   where snapshot requests are saved for
+                                   the next start; empty = not saved
 """
 
 from __future__ import annotations
@@ -47,10 +61,15 @@ from __future__ import annotations
 import collections.abc
 import contextlib
 import copy
+import datetime
 import hashlib
 import json
 import os
+import socket
+import sys
+import threading
 import time
+import urllib.request
 from typing import Any
 
 import click
@@ -63,6 +82,9 @@ _MAX_ENTRIES = max(1, int(os.environ.get("LITERT_PREFIX_CACHE_SIZE", "3")))
 _MAX_MB = int(os.environ.get("LITERT_PREFIX_CACHE_MAX_MB", "5120"))
 _MAX_SNAPSHOTS = max(
     0, int(os.environ.get("LITERT_PREFIX_CACHE_SNAPSHOT", "3")))
+_WARM_FILE = os.environ.get(
+    "LITERT_PREFIX_CACHE_WARM_FILE", "/root/.litert-lm/prefix-snapshots.json")
+_WARM_PORT = 9379  # entrypoint.sh's `serve --port`.
 # The container's own cgroup (v2, private cgroup namespace).
 _MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
@@ -157,13 +179,15 @@ def _canonical_message(
   return (role, _canonical_content(msg.get("content")), calls)
 
 
+_CONFIG_KEYS = (
+    "model", "tools", "temperature", "top_p", "top_k", "seed",
+    "reasoning_effort", "response_format",
+)
+
+
 def _config_key(body: collections.abc.Mapping[str, Any]) -> str:
   """Everything fixed at conversation creation must match to reuse it."""
-  keys = (
-      "model", "tools", "temperature", "top_p", "top_k", "seed",
-      "reasoning_effort", "response_format",
-  )
-  return json.dumps({k: body.get(k) for k in keys}, sort_keys=True)
+  return json.dumps({k: body.get(k) for k in _CONFIG_KEYS}, sort_keys=True)
 
 
 def engine_fault(e: BaseException) -> bool:
@@ -367,11 +391,13 @@ def _match(
 
 class _Snapshot:
 
-  def __init__(self, engine, key: str, system: list[tuple[Any, ...]], conv):
+  def __init__(self, engine, key: str, system: list[tuple[Any, ...]], conv,
+               recipe: dict[str, Any]):
     self.engine = engine
     self.key = key
     self.system = system
     self.conv = conv
+    self.recipe = recipe
 
 # System-prompt snapshots, least recently used first.
 _snapshots: list[_Snapshot] = []
@@ -398,8 +424,70 @@ def _clone(conv):
   return twin
 
 
+def _today() -> str:
+  return datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+
+
+def _load_warm() -> list[dict[str, Any]]:
+  try:
+    with open(_WARM_FILE) as f:
+      recipes = json.load(f)
+    return recipes if isinstance(recipes, list) else []
+  except (OSError, ValueError):
+    return []
+
+
+def _recipe(body: collections.abc.Mapping[str, Any]) -> dict[str, Any]:
+  """A new chat's request without its user message."""
+  recipe = {k: body[k] for k in _CONFIG_KEYS if body.get(k) is not None}
+  recipe["messages"] = body["messages"][:-1]
+  return recipe
+
+
+def _save_warm() -> None:
+  """Records the snapshots kept, least recently used first."""
+  if not _WARM_FILE:
+    return
+  recipes = [s.recipe for s in _snapshots]
+  try:
+    tmp = _WARM_FILE + ".tmp"
+    with open(tmp, "w") as f:
+      json.dump(recipes, f, ensure_ascii=False)
+    os.replace(tmp, _WARM_FILE)
+  except OSError as e:
+    _log(f"warm: not saved ({e})")
+
+
+def _warm() -> None:
+  """Replays today's saved snapshot requests once the server listens."""
+  recipes = [r for r in _load_warm() if r.pop("saved", None) == _today()]
+  if not recipes:
+    return
+  deadline = time.monotonic() + 300
+  while True:
+    try:
+      socket.create_connection(("127.0.0.1", _WARM_PORT), timeout=1).close()
+      break
+    except OSError:
+      if time.monotonic() > deadline:
+        return
+      time.sleep(0.5)
+  for recipe in recipes:  # Least recently used first, as they were kept.
+    body = dict(recipe, stream=False, max_tokens=1)
+    body["messages"] = recipe["messages"] + [{"role": "user", "content": "Hi."}]
+    started = time.monotonic()
+    try:
+      urllib.request.urlopen(urllib.request.Request(
+          f"http://127.0.0.1:{_WARM_PORT}/v1/chat/completions",
+          json.dumps(body).encode(), {"Content-Type": "application/json"},
+      ), timeout=600).read()
+      _log(f"warm: snapshot ready in {time.monotonic() - started:.1f} s")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      _log(f"warm: failed ({e})")
+
+
 def _new_chat(engine, key, canonical, messages, translated_messages,
-              create_kwargs):
+              create_kwargs, body):
   """The snapshot for a new chat's system prompt, tools and settings, or None.
 
   Most recently used last; created if none matches.
@@ -425,10 +513,12 @@ def _new_chat(engine, key, canonical, messages, translated_messages,
     conv = engine.create_conversation(
         messages=translated_messages[:-1],
         filter_channel_content_from_kv_cache=True, **create_kwargs)
-    snap = _Snapshot(engine, key, system, conv)
+    snap = _Snapshot(engine, key, system, conv, _recipe(body))
     _log(f"snapshot: created in {time.monotonic() - started:.1f} s "
          f"({len(_snapshots) + 1} kept)")
+  snap.recipe["saved"] = _today()
   _snapshots.append(snap)
+  _save_warm()
   return snap
 
 
@@ -482,7 +572,7 @@ def conversation(
     conv = None
     try:
       snap = _new_chat(engine, key, canonical, messages, translated_messages,
-                       create_kwargs)
+                       create_kwargs, body)
       if snap is not None:
         conv = _clone(snap.conv)
     except Exception as e:  # pylint: disable=broad-exception-caught
@@ -516,3 +606,8 @@ def conversation(
     _log(f"cached: {len(_entries)}, memory {_memory_mb()} MB")
   else:
     conv.close()
+
+
+# Only in the server: the CLI imports this module for every command.
+if _ENABLED and _MAX_SNAPSHOTS and _WARM_FILE and "serve" in sys.argv[1:]:
+  threading.Thread(target=_warm, name="prefix-cache-warm", daemon=True).start()
