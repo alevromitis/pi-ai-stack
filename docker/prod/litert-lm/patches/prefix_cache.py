@@ -23,10 +23,12 @@ use is never closed for memory.
 New chats (system message(s) then one user message) don't prefill the
 system prompt: they clone a snapshot that holds only it, prefilled when the
 snapshot was created (patches/prefill_preface_option.py) and never sent to.
-A few snapshots are kept, one per system prompt, tools and settings, least
-recently used closed first: switching tools or presets would otherwise
-prefill the whole preface again (2026-10-12, Pi: 17 s with no tools, 29 s
-with Wikipedia, web search and calculator, 94 s with Playwright added).
+LITERT_PREFIX_CACHE_SNAPSHOT snapshots are kept, one per system prompt,
+tools and settings, least recently used closed first; each saves a full
+preface prefill when switching back (2026-10-12, Pi: 17 s with no tools,
+29 s with Wikipedia, web search and calculator, 94 s with Playwright). The
+default is 1: with several, clones of snapshots with different tools
+faulted the MTP drafter more often, and the memory pushed the Pi into swap.
 Clones of it continue exactly like a fresh conversation, with or without
 other clones alive (probes/clone_probe.py --snapshot-control, 2026-10-12);
 first token ~2-3 s instead of ~13 s.
@@ -51,7 +53,7 @@ Env:
   LITERT_PREFIX_CACHE=0            disable (pure upstream behaviour)
   LITERT_PREFIX_CACHE_SIZE=3       most conversations kept alive
   LITERT_PREFIX_CACHE_MAX_MB=5120  close idle ones above this (cgroup memory)
-  LITERT_PREFIX_CACHE_SNAPSHOT=3   snapshots kept; 0 = new chats prefill
+  LITERT_PREFIX_CACHE_SNAPSHOT=1   snapshots kept; 0 = new chats prefill
                                    their system prompt
   LITERT_PREFIX_CACHE_WARM_FILE=   where snapshot requests are saved for
                                    the next start; empty = not saved
@@ -83,7 +85,7 @@ _ENABLED = os.environ.get("LITERT_PREFIX_CACHE", "1") != "0"
 _MAX_ENTRIES = max(1, int(os.environ.get("LITERT_PREFIX_CACHE_SIZE", "3")))
 _MAX_MB = int(os.environ.get("LITERT_PREFIX_CACHE_MAX_MB", "5120"))
 _MAX_SNAPSHOTS = max(
-    0, int(os.environ.get("LITERT_PREFIX_CACHE_SNAPSHOT", "3")))
+    0, int(os.environ.get("LITERT_PREFIX_CACHE_SNAPSHOT", "1")))
 _WARM_FILE = os.environ.get(
     "LITERT_PREFIX_CACHE_WARM_FILE", "/root/.litert-lm/prefix-snapshots.json")
 _WARM_PORT = 9379  # entrypoint.sh's `serve --port`.

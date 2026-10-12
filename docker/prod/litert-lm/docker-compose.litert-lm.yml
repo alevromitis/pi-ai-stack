@@ -51,13 +51,16 @@ services:
       # schemas (patches/prefill_preface_option.py): first token ~5 s instead
       # of 17 s with no tools, 29 s with search and calculator, 94 s with
       # Playwright (2026-10-12). This many are kept, one per system prompt,
-      # tools and settings (preset), so switching between them doesn't
-      # prefill again; 1 = only the last, 0 = each new chat prefills.
+      # tools and settings (preset); 0 = each new chat prefills. Keep 1:
+      # with 3, clones of snapshots with different tools faulted the MTP
+      # drafter again (the bug PLAN-prefix-clone.md describes; one wrong
+      # answer seen) and the container sat at 5.2 GB idle instead of ~3.7,
+      # pushing the Pi into swap (clones ~2 s -> 5-6 s).
       # Their requests are saved in the registry volume
       # (prefix-snapshots.json: system prompts with saved memories, tool
       # schemas) and rebuilt at start if saved the same UTC day: first token
-      # after a restart ~2 s instead of 36 s. Empty file path = not saved.
-      LITERT_PREFIX_CACHE_SNAPSHOT: "${LITERT_PREFIX_CACHE_SNAPSHOT:-3}"
+      # after a restart ~5 s instead of 36 s. Empty file path = not saved.
+      LITERT_PREFIX_CACHE_SNAPSHOT: "${LITERT_PREFIX_CACHE_SNAPSHOT:-1}"
       LITERT_PREFIX_CACHE_WARM_FILE: "${LITERT_PREFIX_CACHE_WARM_FILE-/root/.litert-lm/prefix-snapshots.json}"
       # 1 = answer LibreChat's memory agent without the model unless the
       # user's message asks to remember/forget (patches/memory_gate.py),
