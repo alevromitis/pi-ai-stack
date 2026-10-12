@@ -28,9 +28,12 @@ endpoints:
       # Titles via same chat-completions route. 'current_model' avoids pinning non-existent name.
       titleConvo: true
       titleModel: 'current_model'
-      # LiteRT-LM's prefix (KV) cache holds one conversation, and a title
-      # request is a miss that closes it. Generate the title after the reply
-      # so it doesn't evict the cache mid-turn or compete for the Pi's CPU.
+      # LiteRT-LM answers the title request itself (its title gate,
+      # LITERT_TITLE_GATE) with a title cut from the first message, so it
+      # doesn't evict the chat from the prefix cache. That gate matches
+      # LibreChat's default completion prompt: leave titlePrompt and
+      # titleMethod unset. 'final' still keeps it off the CPU mid-reply if
+      # the gate is turned off.
       titleTiming: 'final'
       modelDisplayLabel: 'LiteRT-LM'
       # Google's recommended Gemma sampling is temperature 1.0, top_p 0.95,

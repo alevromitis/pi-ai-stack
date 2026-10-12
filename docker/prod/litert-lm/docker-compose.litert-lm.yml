@@ -43,6 +43,10 @@ services:
       # user's message asks to remember/forget (patches/memory_gate.py),
       # 0 = every memory request runs the model and evicts the prefix cache.
       LITERT_MEMORY_GATE: "${LITERT_MEMORY_GATE:-1}"
+      # 1 = answer LibreChat's chat-title request with a title cut from the
+      # first message (patches/title_gate.py), 0 = the model writes titles,
+      # which evicts the chat and re-prefills it on its second message.
+      LITERT_TITLE_GATE: "${LITERT_TITLE_GATE:-1}"
       # 1 = end answers built on Wikipedia/SearXNG results with a Sources
       # line written from those results (patches/citations.py),
       # 0 = leave citing to the model.

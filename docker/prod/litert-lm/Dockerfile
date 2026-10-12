@@ -77,6 +77,8 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 # Gemma's thinking as reasoning_content (upstream generates and discards it).
 # patches/memory_gate.py answers LibreChat's memory agent without the engine
 # unless the user asked to remember or forget something.
+# patches/title_gate.py answers LibreChat's chat-title request with a title
+# cut from the first message, so it doesn't evict the chat from the cache.
 # patches/citations.py ends answers built on search results with a Sources
 # line the server writes from those results, since the model cites
 # unpredictably.
@@ -88,11 +90,13 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 COPY patches/ /tmp/patches/
 RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_handler.py')")" \
     && cp /tmp/patches/prefix_cache.py /tmp/patches/memory_gate.py \
+          /tmp/patches/title_gate.py \
           /tmp/patches/citations.py /tmp/patches/reminder.py \
           /tmp/patches/length.py "$d/" \
     && python3 /tmp/patches/apply_prefix_cache.py "$d" \
     && python3 /tmp/patches/apply_reasoning.py "$d" \
     && python3 /tmp/patches/apply_memory_gate.py "$d" \
+    && python3 /tmp/patches/apply_title_gate.py "$d" \
     && python3 /tmp/patches/apply_reminder.py "$d" \
     && python3 /tmp/patches/apply_citations.py "$d" \
     && python3 /tmp/patches/apply_length.py "$d" \
