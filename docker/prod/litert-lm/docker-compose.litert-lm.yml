@@ -82,6 +82,11 @@ services:
       # 1 = append the system prompt's "Before answering:" paragraph to every
       # user message (patches/reminder.py), 0 = send messages as they are.
       LITERT_REMINDER: "${LITERT_REMINDER:-1}"
+      # Tools dropped from every request (patches/hide_tools.py): each schema
+      # is prefilled, and a snapshot rebuild takes ~24 s. Comma-separated
+      # names as LibreChat sends them; unset = searxng's search_suggestions
+      # and instance_info, empty = none.
+      LITERT_HIDE_TOOLS: "${LITERT_HIDE_TOOLS-searxng_search_suggestions_mcp_searxng,searxng_instance_info_mcp_searxng}"
     env_file:
       - .env.litert-lm
     volumes:
