@@ -87,6 +87,9 @@ services:
       # names as LibreChat sends them; unset = searxng's search_suggestions
       # and instance_info, empty = none.
       LITERT_HIDE_TOOLS: "${LITERT_HIDE_TOOLS-searxng_search_suggestions_mcp_searxng,searxng_instance_info_mcp_searxng}"
+      # Tools sent without their description (same patch; the removed text
+      # is in the README): web_url_read's is ~70 tokens about FlareSolverr.
+      LITERT_HIDE_TOOL_DESCRIPTIONS: "${LITERT_HIDE_TOOL_DESCRIPTIONS-web_url_read_mcp_searxng}"
     env_file:
       - .env.litert-lm
     volumes:
