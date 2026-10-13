@@ -21,12 +21,13 @@ name: agent-tools
 #   mcp-searxng     :8080  web search via searxng-1 + web_url_read (no workspace)
 #   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only
 #   mcp-calc        :8000  arithmetic, dates, letter counts; internal only
+#   mcp-translate   :8000  offline translation (Argos models); internal only
 #   kiwix-serve     :8080  the same ZIM as web pages, published ${KIWIX_PORT}
 #
 # Shell, filesystem and Playwright share ${AGENT_WORKSPACE_DIR} as
 # /workspace (uid 1000), the only host path they can touch. mcp-wikipedia
-# and kiwix-serve see only ${WIKIPEDIA_ZIM_DIR}, read-only. mcp-calc sees
-# no host path.
+# and kiwix-serve see only ${WIKIPEDIA_ZIM_DIR}, read-only, mcp-translate
+# only ${TRANSLATE_MODELS_DIR}, read-only. mcp-calc sees no host path.
 
 x-sandbox: &sandbox
   restart: unless-stopped
@@ -298,6 +299,48 @@ services:
     # No internet, no LAN, no files: pure computation.
     networks:
       - internal
+
+  mcp-translate:
+    <<: *sandbox
+    build:
+      context: ./translate
+    image: agent-tools-translate:local
+    container_name: mcp-translate-1
+    environment:
+      TRANSLATE_MODELS: /models
+      # Exact Host header LibreChat sends (DNS-rebinding allowlist).
+      MCP_ALLOWED_HOSTS: mcp-translate-1:8000
+      # Pairs kept in memory (~60-120 MB each); a pivot (el->en->de) uses two.
+      # RSS levels off at ~500 MB after many pairs (evicted models are
+      # unloaded and malloc_trim'd; fewer arenas hold less freed memory).
+      TRANSLATE_KEEP_LOADED: "2"
+      MALLOC_ARENA_MAX: "2"
+      # The Pi's CPU is the LLM's.
+      TRANSLATE_THREADS: "2"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 768M
+          pids: 64
+    # No internet, no LAN: it reads local model files.
+    networks:
+      - internal
+    volumes:
+      - type: bind
+        # Written by translate/fetch_models.py on the host (~5 GB, 60 pairs).
+        source: ${TRANSLATE_MODELS_DIR:-/mnt/external/argos-models}
+        target: /models
+        read_only: true
+        bind:
+          # On the USB disk, like the ZIM: fail if it isn't mounted.
+          create_host_path: false
 
   kiwix-serve:
     <<: *sandbox

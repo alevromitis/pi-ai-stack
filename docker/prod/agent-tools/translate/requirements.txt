@@ -1,0 +1,9 @@
+# Direct dependencies, pinned; mcp and uvicorn bump with calc/requirements.txt.
+mcp==2.3.0
+uvicorn==0.54.0
+ctranslate2==4.8.3
+sentencepiece==0.2.2
+py3langid==0.4.0
+# The older Argos packages' Moses + BPE tokenization.
+sacremoses==0.2.0
+subword-nmt==0.3.8

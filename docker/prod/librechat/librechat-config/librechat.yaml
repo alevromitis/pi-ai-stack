@@ -132,6 +132,16 @@ mcpServers:
     title: 'Calculator'
     description: 'Exact arithmetic, dates and letter counts.'
     timeout: 10000
+  # Offline translation (Argos models in agent-tools, no network): one
+  # translate tool, English <-> 30 languages, others pivot via English.
+  # The models work in English; this brings other languages in and out.
+  translate:
+    type: streamable-http
+    url: 'http://mcp-translate-1:8000/mcp'
+    title: 'Translate'
+    description: 'Offline translation between English and 30 languages.'
+    # The first call of a language pair loads its model (~1-2 s on the Pi).
+    timeout: 30000
   # shell:
   #   type: streamable-http
   #   url: 'http://mcp-shell-1:8000/mcp'
@@ -207,6 +217,7 @@ mcpSettings:
     - 'mcp-searxng-1:8080'
     - 'mcp-wikipedia-1:8000'
     - 'mcp-calc-1:8000'
+    - 'mcp-translate-1:8000'
     # - 'mcp-shell-1:8000'
     # - 'mcp-filesystem-1:8000'
     - 'mcp-playwright-1:8931'
@@ -281,6 +292,7 @@ modelSpecs:
         - 'wikipedia'
         - 'searxng'
         - 'calc'
+        - 'translate'
       preset:
         endpoint: 'Qwen'
         model: 'qwen3.5-9b'
@@ -302,6 +314,7 @@ modelSpecs:
           - Facts you are not certain of (names, dates, numbers, quotes, recent events, prices, URLs, APIs): search when you have search tools - Wikipedia (search it in English) for encyclopedic facts, web search for current events and everything else - and answer from the results. Check that a result names exactly what was asked; a similar name is a different person or thing. Without search tools, say how sure you are.
           - Web search gives only short snippets: when none contains the answer, read the best result's page (web_url_read) before answering.
           - Use the calculator tools for arithmetic, date differences and letter counts when you have them.
+          - A message in another language: think and search in English, and answer in the user's language. When you have the translate tool, use it to translate the message into English first and your final answer back.
           - When you use search results or a page you read, end with Sources: [Title](URL) for the ones you used.
           - Make independent tool calls together. If a tool fails, say so. Never claim an action (searched, ran, created, deleted) that no tool result shows.
           - No search for greetings, questions about yourself, or text the user gave you.
@@ -363,6 +376,7 @@ modelSpecs:
           - A tool's output beats what you remember or expect: use it as it is, even when it surprises you.
           - Search with the name of the thing the question is about first, capitalised, then the detail ("Oxygen atomic number", "Radium discovery"), not the whole question: Wikipedia finds articles by their names.
           - Calculations and counts: use a tool if you have one, else work them out step by step in your thinking.
+          - A message in another language: when you have the translate tool, translate it into English, think and search in English, then translate your final answer into the user's language and reply with that translation. Without the tool, answer in English.
           - A result counts only if it states the answer for exactly what was asked: the same name, word for word, and the same place and time. A similar name is a different person or thing ("John Smithson" is not "John Smith"), a result that only shares words with the question is about something else (an "oxygen plant" is a factory), and a fact about another year or place doesn't answer the question. If no result names it, or none states the answer, search again now with a better query (other words, the full name, the other search tool) or read a promising result's page. Say "I don't know" only after two more searches fail, or if you can't search.
           - When you use search results or a page you read, end with Sources: [Title](URL) for the ones that state what you said.
           - Make several tool calls at once when they don't depend on each other (e.g. searches for different things). If a tool fails, say so.
