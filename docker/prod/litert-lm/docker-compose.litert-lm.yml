@@ -86,6 +86,12 @@ services:
       # is prefilled, and a snapshot rebuild takes ~24 s. Comma-separated
       # names as LibreChat sends them; unset = searxng's search_suggestions
       # and instance_info, empty = none.
+      # 1 = chats in other languages reach the model in English and the
+      # reply goes back translated (patches/translation.py, via mcp-translate
+      # in agent-tools), 0 = messages and replies pass untouched.
+      LITERT_TRANSLATE: "${LITERT_TRANSLATE:-1}"
+      LITERT_TRANSLATE_URL: "${LITERT_TRANSLATE_URL:-http://mcp-translate-1:8000/api/translate}"
+      LITERT_TRANSLATE_MIN_CONF: "${LITERT_TRANSLATE_MIN_CONF:-0.8}"
       LITERT_HIDE_TOOLS: "${LITERT_HIDE_TOOLS-searxng_search_suggestions_mcp_searxng,searxng_instance_info_mcp_searxng}"
       # LITERT_TOOL_DESCRIPTIONS (same patch, set in .env.litert-lm to
       # override): JSON {name: text} replacing tool descriptions, "" drops
@@ -102,6 +108,8 @@ services:
       - "${APP_PORT:-9379}:${APP_CONTAINER_PORT:-9379}"
     networks:
       - external
+      # mcp-translate only (patches/translation.py); owned by agent-tools.
+      - translate
     mem_limit: "${LITERT_MEM_LIMIT:-7g}"
     mem_reservation: "${LITERT_MEM_RESERVATION:-4g}"
     # Equal to mem_limit = no extra swap allowed for this container at all.
@@ -162,3 +170,8 @@ networks:
   external:
     driver: bridge
     name: litert-lm-external
+  translate:
+    # Owned by the agent-tools stack (up first). Declared external so we
+    # join it, not duplicate it.
+    name: agent-tools-translate
+    external: true

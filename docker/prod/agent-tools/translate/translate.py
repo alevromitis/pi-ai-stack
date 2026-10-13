@@ -143,23 +143,86 @@ class Translator:
             _LIBC.malloc_trim(0)
         return pair
 
-    def _run(self, src: str, dst: str, text: str) -> str:
+    def _batch(self, src: str, dst: str, pieces: list[str]) -> list[str]:
+        """Each piece translated, sentence by sentence, in one batch."""
         pair = self._pair(src, dst)
-        out = []
-        for line in text.split("\n"):
-            sentences = [s for s in _SENTENCE_END.split(line.strip()) if s.strip()]
-            out.append(" ".join(pair.translate(sentences)) if sentences else "")
-        return "\n".join(out)
+        split = [[s for s in _SENTENCE_END.split(p.strip()) if s.strip()] for p in pieces]
+        flat = iter(pair.translate([s for ss in split for s in ss]))
+        return [" ".join(next(flat) for _ in ss) for ss in split]
 
-    def translate(self, text: str, target: str = "en", source: str = "") -> tuple[str, str, str]:
-        """Returns (source code, target code, translation)."""
+    def _run(self, src: str, dst: str, pieces: list[str]) -> list[str]:
+        if src == "en" or dst == "en":
+            return self._batch(src, dst, pieces)
+        return self._batch("en", dst, self._batch(src, "en", pieces))
+
+    def translate(self, text: str, target: str = "en", source: str = "",
+                  min_confidence: float = 0.0, only_from: str = "") -> dict:
+        """Translates the prose of a Markdown text; code, links, URLs and
+        Sources lines stay as they are. Without `source` the language is
+        detected; below `min_confidence`, or when it isn't `only_from`, the
+        text comes back untranslated. Returns {source, target, confidence,
+        translated, text}."""
         if not text.strip():
             raise TranslateError("empty text")
         dst = self.code(target or "en")
-        src = self.code(source) if source.strip() else self.detect(text)[0]
-        if src == dst:
-            return src, dst, text
+        parts = _parts(text)
+        prose = " ".join(p for kind, p in parts if kind == "tr")
+        if source.strip():
+            src, confidence = self.code(source), 1.0
+        else:
+            src, confidence = self.detect(prose or text)
+        result = {"source": src, "target": dst, "confidence": round(confidence, 3), "translated": False, "text": text}
+        if (src == dst or not prose.strip() or confidence < min_confidence
+                or only_from and src != self.code(only_from)):
+            return result
         with self._lock:
-            if src == "en" or dst == "en":
-                return src, dst, self._run(src, dst, text)
-            return src, dst, self._run("en", dst, self._run(src, "en", text))
+            done = iter(self._run(src, dst, [p for kind, p in parts if kind == "tr"]))
+        out = []
+        for kind, p in parts:
+            if kind == "keep":
+                out.append(p)
+            else:
+                # Keep the piece's surrounding spaces: "see [link](url) here".
+                lead, trail = p[:len(p) - len(p.lstrip())], p[len(p.rstrip()):]
+                out.append(lead + next(done) + trail)
+        return result | {"translated": True, "text": "".join(out)}
+
+
+# Kept as they are: fenced code blocks; Sources lines and lines of nothing
+# but links (citations.py writes them); list, heading and quote markers;
+# links, inline code, URLs, maths and table bars inside a line. The
+# translator would garble them ("[Παρίσι](https://el.wikipedia...").
+_FENCE = re.compile(r"^[ \t]*```.*?^[ \t]*```[^\n]*$", re.S | re.M)
+_KEEP_LINE = re.compile(r"^\s*(?:[*_]*Sources?[*_]*:.*|(?:\[[^\]\n]+\]\([^)\n]+\)[\s,;.]*)+)$", re.I)
+_PREFIX = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|#{1,6}|>)\s+)*")
+_PROTECT = re.compile(r"\[[^\]\n]+\]\((?:[^\s()]|\([^\s()]*\))+\)|`[^`\n]+`|https?://\S+|\$[^$\n]+\$|\|")
+# Bold and italics markers: dropped from translated prose, which would
+# move or split them.
+_EMPHASIS = re.compile(r"\*\*|__")
+
+
+def _parts(text: str) -> list[tuple[str, str]]:
+    """The text as ("keep", s) and ("tr", s) pieces, in order."""
+    parts: list[tuple[str, str]] = []
+    pos = 0
+    for block in [*_FENCE.finditer(text), None]:
+        prose = text[pos:block.start() if block else len(text)]
+        for line in re.split(r"(?<=\n)", prose):
+            body = line.rstrip("\n")
+            if not body.strip() or _KEEP_LINE.match(body):
+                parts.append(("keep", line))
+                continue
+            prefix = _PREFIX.match(body).group(0)
+            parts.append(("keep", prefix))
+            at = len(prefix)
+            for kept in _PROTECT.finditer(body, at):
+                parts.append(("tr", _EMPHASIS.sub("", body[at:kept.start()])))
+                parts.append(("keep", kept.group(0)))
+                at = kept.end()
+            parts.append(("tr", _EMPHASIS.sub("", body[at:])))
+            parts.append(("keep", line[len(body):]))
+        if block:
+            parts.append(("keep", block.group(0)))
+            pos = block.end()
+    # Pieces with no letters (" ", ", ", "2.") need no model.
+    return [("keep" if kind == "tr" and not re.search(r"[^\W\d_]", p) else kind, p) for kind, p in parts if p]

@@ -14,6 +14,8 @@ name: agent-tools
 #             LAN; see README "Agent tools".
 #   searxng   searxng-external (owned by the searxng stack, must be up).
 #   web       agent-tools-web. kiwix-serve alone, for its published port.
+#   translate agent-tools-translate (internal: true). mcp-translate and
+#             litert-lm-1 (external there), for its /api/translate.
 #
 #   mcp-shell       :8000  allowlisted commands, cwd /workspace (disabled)
 #   mcp-filesystem  :8000  read/write confined to /workspace (disabled)
@@ -329,9 +331,12 @@ services:
           cpus: "2.0"
           memory: 768M
           pids: 64
-    # No internet, no LAN: it reads local model files.
+    # No internet, no LAN: it reads local model files. `translate` lets
+    # litert-lm-1 call /api/translate (its patches/translation.py) without
+    # joining agent-tools-internal.
     networks:
       - internal
+      - translate
     volumes:
       - type: bind
         # Written by translate/fetch_models.py on the host (~5 GB, 60 pairs).
@@ -395,6 +400,10 @@ networks:
   web:
     name: agent-tools-web
     driver: bridge
+  translate:
+    name: agent-tools-translate
+    driver: bridge
+    internal: true
   searxng:
     # Owned by searxng stack. Declared external so we join it (not duplicate).
     name: ${SEARXNG_NETWORK:-searxng-external}

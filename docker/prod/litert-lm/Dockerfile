@@ -96,13 +96,16 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 # patches/length.py reports a reply cut off at max_tokens as "length", with a
 # closing line saying so (upstream says "stop", an empty reply looks done).
 # patches/hide_tools.py drops tools the model never needs (LITERT_HIDE_TOOLS).
+# patches/translation.py sends chats in other languages to the model in
+# English and translates the reply back (mcp-translate, agent-tools).
 # Fails the build on upstream drift.
 COPY patches/ /tmp/patches/
 RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_handler.py')")" \
     && cp /tmp/patches/prefix_cache.py /tmp/patches/memory_gate.py \
           /tmp/patches/title_gate.py \
           /tmp/patches/citations.py /tmp/patches/reminder.py \
-          /tmp/patches/length.py /tmp/patches/hide_tools.py "$d/" \
+          /tmp/patches/length.py /tmp/patches/hide_tools.py \
+          /tmp/patches/translation.py "$d/" \
     && python3 /tmp/patches/apply_prefix_cache.py "$d" \
     && python3 /tmp/patches/apply_reasoning.py "$d" \
     && python3 /tmp/patches/apply_memory_gate.py "$d" \
@@ -111,6 +114,7 @@ RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_h
     && python3 /tmp/patches/apply_hide_tools.py "$d" \
     && python3 /tmp/patches/apply_citations.py "$d" \
     && python3 /tmp/patches/apply_length.py "$d" \
+    && python3 /tmp/patches/apply_translation.py "$d" \
     && rm -rf /tmp/patches
 
 WORKDIR /app
