@@ -305,9 +305,9 @@ services:
       - /tmp
 
 networks:
-  # Explicit subnets: rpi's default Docker address pools are exhausted (31
-  # networks; see README "Points for improvement"). 10.89.0.0/16 is unused
-  # on the host, LAN and tailnet.
+  # Explicit subnets: the host's default Docker address pools are exhausted
+  # (31 networks, every /16 and /20 taken). 10.89.0.0/16 is unused on the
+  # host, LAN and tailnet.
   external:
     name: librechat-external
     driver: bridge

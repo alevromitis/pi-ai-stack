@@ -8,7 +8,7 @@ tools differ from the kept snapshot's rebuilds it (prefix_cache.py, ~24 s),
 so useless tools cost time on every rebuild. mcp-searxng and LibreChat can't
 hide single tools; searxng's search_suggestions and instance_info only
 distract a small model. web_url_read's description (~70 tokens, mostly
-about FlareSolverr/Byparr, which aren't run here; quoted in the README)
+about FlareSolverr/Byparr, which aren't run here; quoted in agent-tools/README.md)
 is replaced with one short line.
 
 Env:

@@ -1,5 +1,5 @@
 # Direct dependencies, pinned; bump deliberately and re-run the checks in
-# README "agent-connectors". mcp 2.x serves the 2025-era protocol versions
+# README.md. mcp 2.x serves the 2025-era protocol versions
 # LibreChat's TS SDK (1.29) speaks, verified 2026-10-07.
 mcp==2.3.0
 httpx==0.28.1

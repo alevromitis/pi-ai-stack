@@ -107,8 +107,8 @@ networks:
     name: agent-connectors-internal
     driver: bridge
     internal: true
-    # Explicit subnet: rpi's default address pools are nearly exhausted (see
-    # README "Points for improvement"); librechat uses 10.89.10-11.0/24.
+    # Explicit subnet: the host's default Docker address pools are nearly
+    # exhausted; librechat uses 10.89.10-11.0/24.
     ipam:
       config:
         - subnet: 10.89.20.0/24

@@ -2,23 +2,26 @@
 # LibreChat on rpi. A systemd *user* unit: it runs while the user is logged
 # in; while it is down, LibreChat's Qwen chats fail.
 #
-# Install (README "Qwen on the workstation"):
+# Install (README.md beside this file):
 #   install -Dm644 llama-qwen.service ~/.config/systemd/user/llama-qwen.service
 #   systemctl --user daemon-reload && systemctl --user enable --now llama-qwen
 #
 # Needs the Arch `llama-cpp` package (ggml-vulkan), the model at
-# ~/models/Qwen3.5-9B-Q4_K_M.gguf, and ~/.config/llama-qwen/api-keys (mode
+# ~/models/Qwen3.5-9B-Q4_K_M.gguf, ~/.config/llama-qwen/api-keys (mode
 # 600, one key per line; the same key is QWEN_API_KEY in librechat's
-# .env.librechat).
+# .env.librechat) and ~/.config/llama-qwen/env with LLAMA_QWEN_HOST=<the
+# workstation's tailnet IPv4>.
 
 [Unit]
 Description=llama-server: Qwen3.5-9B for LibreChat
 After=network-online.target
 
 [Service]
+EnvironmentFile=%h/.config/llama-qwen/env
 # Flags, 2026-10-10 (Arc B570 10 GB; ~8 GB free beside the desktop):
-#   --host        the tailnet address only; rpi reaches it over Tailscale.
-#                 Fails until tailscaled has the address, hence Restart.
+#   --host        the tailnet address only (LLAMA_QWEN_HOST, from the env
+#                 file); rpi reaches it over Tailscale. Fails until
+#                 tailscaled has the address, hence Restart.
 #   -ngl 99       every layer on the GPU (~4.9 GB).
 #   -fa off       flash attention is slow on this Vulkan build: at 16k depth
 #                 41 vs 30 tok/s generation, 841 vs 291 tok/s prefill.
@@ -44,7 +47,7 @@ After=network-online.target
 ExecStart=/usr/bin/llama-server \
     --model %h/models/Qwen3.5-9B-Q4_K_M.gguf \
     --alias qwen3.5-9b \
-    --host <workstation-tailnet-ip> --port 8091 \
+    --host ${LLAMA_QWEN_HOST} --port 8091 \
     --api-key-file %h/.config/llama-qwen/api-keys \
     -ngl 99 -fa off -c 49152 -np 1 \
     --ctx-checkpoints 8 --checkpoint-min-step 1024 --cache-ram 1024 \

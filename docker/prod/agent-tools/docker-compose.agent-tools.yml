@@ -11,7 +11,7 @@ name: agent-tools
 #             no LAN, no host - an injected prompt can't exfiltrate or pivot.
 #   egress    agent-tools-egress. Playwright's browser and mcp-searxng's
 #             page reader need the internet. Docker NAT also reaches the
-#             LAN; see README "Agent tools".
+#             LAN; see README.md, "Threat model".
 #   searxng   searxng-external (owned by the searxng stack, must be up).
 #   web       agent-tools-web. kiwix-serve alone, for its published port.
 #   translate agent-tools-translate (internal: true). mcp-translate and
@@ -198,7 +198,7 @@ services:
       MCP_HTTP_HOST: 0.0.0.0
       # Exact Host header LibreChat sends (DNS-rebinding allowlist).
       MCP_HTTP_ALLOWED_HOSTS: mcp-searxng-1:8080
-      # Small-context tuning (see README "Agent tools"): minimal tool
+      # Small-context tuning (see README.md): minimal tool
       # schemas, few short results, pages capped at ~1.5k tokens.
       SEARXNG_LITE_TOOLS: "true"
       SEARXNG_MAX_RESULTS: "5"
@@ -238,7 +238,7 @@ services:
       WIKIPEDIA_ZIM: /zim/${WIKIPEDIA_ZIM_FILE:?set WIKIPEDIA_ZIM_FILE in .env}
       # Exact Host header LibreChat sends (DNS-rebinding allowlist).
       MCP_ALLOWED_HOSTS: mcp-wikipedia-1:8000
-      # Small-context tuning (see README "agent-tools"): 5 passages of <=500
+      # Small-context tuning (see README.md): 5 passages of <=500
       # chars from the top 3 articles, ~2.1k chars (~550 tokens) a search,
       # ending in a Sources line the model is told to copy.
       WIKIPEDIA_RESULTS: "5"
@@ -284,7 +284,7 @@ services:
       # Exact Host header LibreChat sends (DNS-rebinding allowlist).
       MCP_ALLOWED_HOSTS: mcp-calc-1:8000
       # date_diff/date_add read "today" in this zone (agent-connectors' too).
-      TZ: ${TZ:-Etc/UTC}
+      TZ: ${TZ:?set TZ in .env}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 30s

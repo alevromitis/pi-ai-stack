@@ -107,7 +107,7 @@ services:
     # HAProxy in front of the read-only-mounted socket. It filters by API
     # path and method, not by request body: it can't stop the gateway from
     # asking for a privileged container. The gateway is trusted for that
-    # (README "agent-sandbox").
+    # (README.md, "Threat model").
     image: lscr.io/linuxserver/socket-proxy:${SOCKET_PROXY_TAG:?set SOCKET_PROXY_TAG in .env}
     container_name: agent-sandbox-docker-proxy-1
     environment:
@@ -155,8 +155,8 @@ networks:
     name: agent-sandbox-internal
     driver: bridge
     internal: true
-    # Explicit subnets: rpi's default address pools are exhausted (README
-    # "Points for improvement"); librechat has 10.89.10-11, connectors 10.89.20.
+    # Explicit subnets: the host's default Docker address pools are
+    # exhausted; librechat has 10.89.10-11, connectors 10.89.20.
     ipam:
       config:
         - subnet: 10.89.30.0/24

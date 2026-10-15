@@ -97,7 +97,7 @@ services:
       # override): JSON {name: text} replacing tool descriptions, "" drops
       # one. Its default, in hide_tools.py (compose would cut the JSON at
       # its first "}"), shortens web_url_read's ~70 tokens about
-      # FlareSolverr; the original text is in the README.
+      # FlareSolverr; the original text is in agent-tools/README.md.
     env_file:
       - .env.litert-lm
     volumes:

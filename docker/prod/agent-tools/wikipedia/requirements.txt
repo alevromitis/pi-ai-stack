@@ -1,5 +1,5 @@
 # Direct dependencies, pinned; bump deliberately and re-run the checks in
-# README "agent-tools". mcp 2.3.0 matches agent-connectors (the protocol
+# ../README.md. mcp 2.3.0 matches agent-connectors (the protocol
 # versions LibreChat's TS SDK speaks); libzim 3.13 has arm64 wheels.
 mcp==2.3.0
 uvicorn==0.54.0

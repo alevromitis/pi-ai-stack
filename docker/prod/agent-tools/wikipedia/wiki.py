@@ -1,7 +1,7 @@
 """Search a Kiwix Wikipedia ZIM and pick the passages that answer a query.
 
-Three steps, chosen by measurement (2026-10-09, 44 questions, see README
-"agent-tools"):
+Three steps, chosen by measurement (2026-10-09, 44 questions, see
+agent-tools/README.md):
 
   candidates  the article titled with the first name the query gives,
               then libzim's title suggestions (named things: "Eiffel
