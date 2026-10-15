@@ -1,6 +1,6 @@
 """Read an RSS item's own web page, and the PDFs it links, for feeds that
-carry only a title (e.g. announcement feeds, whose dates live in
-attached PDFs).
+carry only a title (e.g. announcement feeds whose dates live in attached
+PDFs).
 
 The link comes from feed data, i.e. from the web, so the fetch is bounded:
 http(s) only; every hop (redirects included) must resolve to public

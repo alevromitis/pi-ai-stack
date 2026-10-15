@@ -312,7 +312,7 @@ attaches only what its task needs.
 `interface.remoteAgents` turns on the agents API
 (`POST /api/agents/v1/chat/completions`, `model` = agent id, `Authorization:
 Bearer <LibreChat API key>`). Create the key under *Settings → API keys*;
-that is what [n8n](../../../README.md#n8n) calls.
+that is what [n8n](https://n8n.io), a separate stack, calls.
 
 ## Still to do before this is fully production-ready
 

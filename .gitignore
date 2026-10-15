@@ -1,0 +1,18 @@
+# .env is the Compose-auto-loaded file (host ports, host paths, image
+# tags); .env.<service> carries credentials. Only the .example templates are
+# committed.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Bind-mounted service data
+data/
+
+# Python bytecode
+__pycache__/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
