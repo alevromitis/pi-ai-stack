@@ -200,15 +200,27 @@ prefix cache survives. `pi-feeds` reads FreshRSS and files dated items into
 Nextcloud through the add-only `calendar-add` endpoint, passing each item's
 link so nothing is filed twice (see [agent-connectors](../agent-connectors/README.md)).
 
-Since 2026-10-10 only `searxng` (Web Search), `wikipedia`
+Active: `searxng` (Web Search), `wikipedia`
 ([Wikipedia](../agent-tools/README.md#wikipedia-mcp-wikipedia)), `calc`
-([Calculator](../agent-tools/README.md#calculator-mcp-calc)), `playwright` (Playwright Browser)
-and `sandbox` (Debian Sandbox) are active; the others are
-commented out in `mcpServers` and `mcpSettings.allowedAddresses`, so the
-specs and agents that use them lose those tools until they're uncommented.
+([Calculator](../agent-tools/README.md#calculator-mcp-calc)), `translate`,
+`playwright` (Playwright Browser), `sandbox` (Debian Sandbox) and, since
+2026-11-02, `freshrss`, `calendar`, `tasks` and `notes`
+([agent-connectors](../agent-connectors/README.md)). `shell`,
+`filesystem` and `calendar-add` are commented out in `mcpServers` and
+`mcpSettings.allowedAddresses`, so the specs and agents that use them lose
+those tools until they're uncommented.
 
-LibreChat v0.8.7 cannot filter individual MCP tools in config; for finer
-cuts build an agent in the UI and tick only the tools it needs.
+**Approval before changes.** `endpoints.agents.toolApproval` (v0.8.8+)
+lists every write tool of the connectors under `ask`: a call to one pauses
+the reply on an Approve/Deny card with its arguments, and nothing is
+written until it is approved (a rejected call reaches the model as
+rejected). Everything else is under `allow`. The `pi-calendar` spec
+(*Calendar*) is the calendar agent: LiteRT-LM with `calendar`, `tasks` and
+`freshrss`; the connector picks the calendar (`NEXTCLOUD_CALENDAR_RULES`),
+not the model.
+
+LibreChat cannot filter individual MCP tools in config; for finer cuts
+build an agent in the UI and tick only the tools it needs.
 
 ## File search (RAG)
 
@@ -288,8 +300,9 @@ because `mongodb` sits on `librechat-internal` (`internal: true`) and
 publishes no port — do not move it onto `external`. The same holds for
 `vectordb`, which runs Postgres with `POSTGRES_HOST_AUTH_METHOD=trust`.
 
-The config schema version is tied to the app version: `v0.8.7` expects
-`librechat.yaml` `version: 1.3.13`. Bump `TAG` and that line together.
+The config schema version is tied to the app version: `v0.8.8` expects
+`librechat.yaml` `version: 1.3.17` (`v0.8.7`: `1.3.13`). Bump `TAG` and
+that line together. From v0.8.8 the image is `ghcr.io/librechat-ai/librechat`.
 
 ## The Qwen endpoint (the default model)
 

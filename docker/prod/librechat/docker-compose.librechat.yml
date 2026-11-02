@@ -31,9 +31,9 @@ services:
 #      context: .
 #      dockerfile: Dockerfile
 #      target: production
-    # digest for v0.8.7:
-    #   sha256:c5db3331b845e1f289f8d04c0c77936c4bbe372f76730a804abc1c37e44d23a9
-    image: ghcr.io/danny-avila/librechat:${TAG:-v0.8.7}
+    # digest for v0.8.8 (the project moved to ghcr.io/librechat-ai with it):
+    #   sha256:5b706bcee1ca154a1e2987303aaeca0eb27f97919cccee4bb604226c2f8abf61
+    image: ghcr.io/librechat-ai/librechat:${TAG:-v0.8.8}
     container_name: librechat-1
     restart: unless-stopped
     # The image declares USER node (uid 1000) and pre-creates /app/uploads,

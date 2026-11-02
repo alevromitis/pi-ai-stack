@@ -25,7 +25,7 @@ sandbox per chat.
      MCP: agent-tools    SearXNG search, Wikipedia (Kiwix ZIM), calculator,
                          translation (Argos), Playwright browser
           agent-sandbox  one Debian container per chat, kept between visits
-          agent-connectors  FreshRSS, Nextcloud Calendar/Tasks/Notes (off)
+          agent-connectors  FreshRSS, Nextcloud Calendar/Tasks/Notes
 ```
 
 ## What's here

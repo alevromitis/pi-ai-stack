@@ -1,11 +1,36 @@
 # LibreChat application config.
 # Docs: https://www.librechat.ai/docs/configuration/librechat_yaml
 #
-# Schema v1.3.13 for LibreChat v0.8.7 (see TAG in .env). Bump with image tag.
-version: 1.3.13
+# Schema v1.3.17 for LibreChat v0.8.8 (see TAG in .env). Bump with image tag.
+version: 1.3.17
 cache: true
 
 endpoints:
+  # Human-in-the-loop tool approval (v0.8.8+): a call to a tool in `ask`
+  # pauses the reply on an Approve/Deny card showing its arguments; nothing
+  # runs until it is approved. So every change to the calendar, tasks, notes
+  # or feed subscriptions waits for a click; reads, search, the browser and
+  # the sandbox run as before. Globs match LibreChat's tool keys
+  # (<tool>_mcp_<server>, or the bare name), `ask` beats `allow`, and an
+  # unlisted tool would ask. A paused run is kept in MongoDB for 24 h.
+  agents:
+    toolApproval:
+      enabled: true
+      ask:
+        - 'event_add*'
+        - 'event_edit*'
+        - 'event_delete*'
+        - 'task_add*'
+        - 'task_edit*'
+        - 'task_delete*'
+        - 'note_add*'
+        - 'note_append*'
+        - 'note_edit*'
+        - 'note_delete*'
+        - 'rss_subscribe*'
+        - 'rss_mark_all_read*'
+      allow:
+        - '*'
   custom:
     # LiteRT-LM's `serve` command (litert-lm 0.18) exposes an OpenAI-compatible
     # server on 0.0.0.0:9379 (GET /v1/models, POST /v1/chat/completions,
@@ -102,8 +127,7 @@ endpoints:
 # Pi. mcp-searxng gives the model `searxng_web_search` + `web_url_read`
 # against our own SearXNG instead.
 mcpServers:
-  # Only Web Search, Wikipedia, Playwright Browser and Debian Sandbox are
-  # active (2026-10-10); the rest are commented out, with their
+  # Shell, filesystem and calendar-add are commented out, with their
   # allowedAddresses entries. Uncomment both to bring one back.
   # The agent-tools stack: one sandboxed container per server, reached over
   # agent-tools-internal (see its compose file). Shell and filesystem have
@@ -163,27 +187,30 @@ mcpServers:
   # The agent-connectors stack: the user's own data, reached over
   # agent-connectors-internal (see its compose file). Each container holds
   # one service's API/app password; the agent-tools containers can't reach
-  # them. Write tools are on, deletes off (ALLOW_DELETE in its env files).
-  # freshrss:
-  #   type: streamable-http
-  #   url: 'http://mcp-freshrss-1:8000/freshrss/mcp'
-  #   title: 'FreshRSS'
-  #   description: 'Feeds and unread articles; mark read, star, subscribe.'
-  # calendar:
-  #   type: streamable-http
-  #   url: 'http://mcp-nextcloud-1:8000/calendar/mcp'
-  #   title: 'Calendar'
-  #   description: 'Nextcloud Calendar: list, add and change events.'
-  # tasks:
-  #   type: streamable-http
-  #   url: 'http://mcp-nextcloud-1:8000/tasks/mcp'
-  #   title: 'Tasks'
-  #   description: 'Nextcloud Tasks: list, add, complete and change tasks.'
-  # notes:
-  #   type: streamable-http
-  #   url: 'http://mcp-nextcloud-1:8000/notes/mcp'
-  #   title: 'Notes'
-  #   description: 'Nextcloud Notes: find, read, add to and write notes.'
+  # them. Write tools are on, deletes off (ALLOW_DELETE in its env files),
+  # and every write waits for approval (toolApproval above).
+  freshrss:
+    type: streamable-http
+    url: 'http://mcp-freshrss-1:8000/freshrss/mcp'
+    title: 'FreshRSS'
+    description: 'Feeds and unread articles; mark read, star, subscribe.'
+    # rss_read may fetch a title-only item's page and PDFs (60 s cap).
+    timeout: 90000
+  calendar:
+    type: streamable-http
+    url: 'http://mcp-nextcloud-1:8000/calendar/mcp'
+    title: 'Calendar'
+    description: 'Nextcloud Calendar: list, add and change events.'
+  tasks:
+    type: streamable-http
+    url: 'http://mcp-nextcloud-1:8000/tasks/mcp'
+    title: 'Tasks'
+    description: 'Nextcloud Tasks: list, add, complete and change tasks.'
+  notes:
+    type: streamable-http
+    url: 'http://mcp-nextcloud-1:8000/notes/mcp'
+    title: 'Notes'
+    description: 'Nextcloud Notes: find, read, add to and write notes.'
   # Add-only view of the calendar and tasks (no edit/delete tools exist on
   # it), for agents that read untrusted feed text and file what they find.
   # calendar-add:
@@ -221,8 +248,8 @@ mcpSettings:
     # - 'mcp-shell-1:8000'
     # - 'mcp-filesystem-1:8000'
     - 'mcp-playwright-1:8931'
-    # - 'mcp-freshrss-1:8000'
-    # - 'mcp-nextcloud-1:8000'
+    - 'mcp-freshrss-1:8000'
+    - 'mcp-nextcloud-1:8000'
     - 'agent-sandbox-gateway-1:8000'
 
 interface:
@@ -274,8 +301,8 @@ modelSpecs:
   # Qwen on the workstation (the default) and plain LiteRT-LM chat on the
   # Pi. MCP tool schemas are re-sent on every model call: ~1 s of prefill on
   # the workstation's GPU, ~2 min per 4k tokens on the Pi's CPU, so only
-  # qwen-chat attaches tools. Leave the plain endpoint/model picker available
-  # next to these specs.
+  # qwen-chat and the narrow pi-calendar attach tools. Leave the plain
+  # endpoint/model picker available next to these specs.
   prioritize: false
   list:
     # Picked for first-time users and after chats are cleared; after that
@@ -388,3 +415,33 @@ modelSpecs:
           - Lead with the answer. Be brief. Fewer correct items beat more guessed ones.
 
           Before answering: work out exactly what is asked (in a follow-up, its subject is earlier in the chat: search with it) and answer all of it, every item if it asks for several. Use only results about that same thing, name, place and time, not ones that merely share its words; if none, or a part is still unanswered, search again for it now, its name first, instead of answering that the results don't say. Calculate and count with a tool; handle letters one at a time. Say only what the user's text, the results or your reasoning support, and cite only the results you used.
+    # The calendar agent on the Pi: Calendar, Tasks and FreshRSS (~1.2k
+    # tokens of schemas, prefilled once per chat). Every change waits for
+    # approval (toolApproval), so the prompt has it act rather than ask
+    # first. The calendar is picked by the connector's rules
+    # (NEXTCLOUD_CALENDAR_RULES), not by the model.
+    - name: 'pi-calendar'
+      label: 'Calendar'
+      description: 'Calendar and tasks with the local model, from chat or your feeds. Every change asks you first.'
+      mcpServers:
+        - 'calendar'
+        - 'tasks'
+        - 'freshrss'
+      preset:
+        endpoint: 'LiteRT-LM'
+        model: 'gemma4-e2b'
+        # As pi-chat.
+        maxContextTokens: 13312
+        max_tokens: 4096
+        reasoning_effort: 'medium'
+        promptPrefix: |
+          You are Gemma 4 E2B, a small model running locally on a Raspberry Pi. You manage the user's Nextcloud calendar and tasks, and read their RSS feeds. Today is {{current_date}}; the tools' replies give the exact time.
+
+          Rules:
+          - To add or change something, call the tool right away; do not ask "shall I?" first. The user sees every change and approves or rejects it before it happens. If one is rejected, say so and do not retry it.
+          - Leave calendar empty unless the user named one: it is chosen for you from the event.
+          - To change or find an event or task, list first (events, tasks) and use the id in square brackets.
+          - From the feeds: list items (rss_items), read the ones that may contain a date (rss_read), and add only items with a real date or deadline: an event for something that happens at a time, a task for a deadline. Always pass the item's link.
+          - Copy dates, times and places exactly as the source gives them; never guess a missing time (use a date-only start for an all-day event).
+          - Never claim a change that no tool result shows ("Created", "Added", "Updated").
+          - Be brief: say what you added or changed, with its date.

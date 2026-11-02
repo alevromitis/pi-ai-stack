@@ -6,10 +6,11 @@ read feed items and file the dated ones (events, deadlines) into the
 Nextcloud calendar or tasks, once each (`pi-feeds`). Lives in
 `docker/prod/agent-connectors/`.
 Nothing is published on the host; LibreChat reaches them on
-`agent-connectors-internal`. **Written 2026-10-07; both servers disabled
-2026-10-13** (Compose profile `disabled`, unused by LibreChat, to free RAM
-on rpi): `docker compose -f docker-compose.agent-connectors.yml --profile
-disabled up -d` brings them back. See [First run](#first-run).
+`agent-connectors-internal`. **Written 2026-10-07; off 2026-10-13 to
+free RAM, back on 2026-11-02** for a calendar agent: LibreChat (v0.8.8+)
+pauses every write tool for approval (`endpoints.agents.toolApproval` in
+`librechat.yaml`), so nothing changes without a click. See
+[First run](#first-run).
 
 | Endpoint | Container | Tools | Talks to |
 |---|---|---|---|
@@ -69,10 +70,19 @@ model spec attaches only the ones its task needs. Code: `app/common.py`,
   at what arrived since the last one (FreshRSS's `ot`).
 * **Writes are conditional** (ETag / `If-Match`): a concurrent change gives
   the model a "list again" error instead of a silent overwrite.
-* **New items** go to `NEXTCLOUD_DEFAULT_CALENDAR` / `_TASK_LIST`, else to
-  Nextcloud's default `personal` calendar. They carry a `TZID` and a
-  `VTIMEZONE` from the pinned `tzdata` wheel (`PYTHONTZPATH` is empty in the
-  image, so the host's tz files are never used).
+* **Which calendar.** The model names one only when the user did. Otherwise
+  `NEXTCLOUD_CALENDAR_RULES` picks it, deterministically: `Calendar: term
+  term | Calendar: …`, first match wins; terms with a dot are domains tried
+  first against the link's host (an RSS item's feed site), then every term
+  is a substring of the title, location, notes or link (case and accents
+  ignored, `_` is a space). The reply names the calendar and the matching
+  term. The rules name the user's own doctors, school and employer, so they
+  live only in the encrypted `.env.mcp-nextcloud`.
+* **New items** with no rule match go to `NEXTCLOUD_DEFAULT_CALENDAR` /
+  `_TASK_LIST`, else to Nextcloud's default `personal` calendar. They
+  carry a `TZID` and a `VTIMEZONE` from the pinned `tzdata` wheel
+  (`PYTHONTZPATH` is empty in the image, so the host's tz files are never
+  used).
 * **Nextcloud is reached inside `nextcloud-aio`** at
   `nextcloud-aio-apache:11000` with `Host: ${NEXTCLOUD_HOST}`: AIO's Caddy
   routes on the Host header, and Nextcloud checks it against

@@ -16,9 +16,8 @@ name: agent-connectors
 #   mcp-nextcloud  :8000  /calendar/mcp /tasks/mcp /notes/mcp   -> nextcloud-aio-apache:11000
 #                         /calendar-add/mcp (list + add only, for feed agents)
 #
-# Both servers are disabled (Compose profile "disabled", 2026-10-13), as
-# they are in librechat.yaml; the agent-connectors-internal network stays on
-# rpi for librechat-1, which joins it.
+# Disabled 2026-10-13 to free RAM, back on 2026-11-02 for the calendar
+# agent (LibreChat asks before every write: endpoints.agents.toolApproval).
 #
 # Each container holds only its own service's credential (an API / app
 # password from .env.<service>) and sees only that service's network.
@@ -54,9 +53,6 @@ x-connector: &connector
 services:
   mcp-freshrss:
     <<: *connector
-    # Disabled 2026-10-13: LibreChat doesn't list it (librechat.yaml has it
-    # commented out). `docker compose --profile disabled up -d` brings it back.
-    profiles: ["disabled"]
     build:
       context: ./
     image: agent-connectors-mcp:local
@@ -77,9 +73,6 @@ services:
 
   mcp-nextcloud:
     <<: *connector
-    # Disabled 2026-10-13: LibreChat doesn't list it (librechat.yaml has it
-    # commented out). `docker compose --profile disabled up -d` brings it back.
-    profiles: ["disabled"]
     image: agent-connectors-mcp:local
     container_name: mcp-nextcloud-1
     depends_on:

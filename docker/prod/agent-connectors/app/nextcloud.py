@@ -16,12 +16,13 @@ scan, events need a fresh listing after a restart. A full UID works too.
 import hashlib
 import os
 import time
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from xml.sax.saxutils import escape
 
 import httpx
@@ -62,6 +63,32 @@ NOTE_MAX_CHARS = env_int("NEXTCLOUD_NOTE_MAX_CHARS", 8000)
 _ALARM = os.environ.get("NEXTCLOUD_EVENT_ALARM", "-PT10M").strip()
 EVENT_ALARM = vDuration.from_ical(_ALARM) if _ALARM else None
 MAX_LISTED = 80
+
+
+def _fold(text: str) -> str:
+    """Lower case without accents (and final sigma folded), for rule matching."""
+    return "".join(c for c in unicodedata.normalize("NFD", text.casefold()) if not unicodedata.combining(c))
+
+
+def _parse_rules(spec: str) -> list[tuple[str, list[str]]]:
+    rules = []
+    for part in spec.split("|"):
+        if not part.strip():
+            continue
+        name, sep, terms = part.partition(":")
+        if not sep or not name.strip() or not terms.split():
+            raise SystemExit(f"NEXTCLOUD_CALENDAR_RULES: bad rule {part.strip()!r}; use 'Calendar: term term | ...'")
+        rules.append((name.strip(), [_fold(term.replace("_", " ")) for term in terms.split()]))
+    return rules
+
+
+# Which calendar a new event goes to when the model names none, so a small
+# model never has to choose: "Calendar: term term | Calendar: term ...".
+# Domain terms (with a dot) are tried against the link's host first, then
+# every term against the title, location, notes and link, rules in order;
+# case and accents are ignored, "_" in a term is a space. No match:
+# NEXTCLOUD_DEFAULT_CALENDAR.
+CALENDAR_RULES = _parse_rules(os.environ.get("NEXTCLOUD_CALENDAR_RULES", ""))
 
 _headers = {"User-Agent": "agent-connectors", "OCS-APIRequest": "true"}
 if HOST:
@@ -476,17 +503,38 @@ def _with_source(notes: str, link: str) -> str:
     return "\n\n".join(part for part in (notes.strip(), f"Source: {link}" if link else "") if part)
 
 
+def _route(title: str, location: str, notes: str, link: str) -> tuple[str, str]:
+    """The calendar CALENDAR_RULES pick for a new event and the term that
+    matched, or ("", "")."""
+    host = _fold(urlsplit(link).hostname or "") if link else ""
+    if host:
+        for name, terms in CALENDAR_RULES:
+            for term in terms:
+                if "." in term and (host == term or host.endswith("." + term)):
+                    return name, term
+    text = _fold(" ".join((title, location, notes, link)))
+    for name, terms in CALENDAR_RULES:
+        for term in terms:
+            if term in text:
+                return name, term
+    return "", ""
+
+
 @tool(calendar_server, add_server, kind="write", service="Nextcloud")
 async def event_add(
     title: str, start: str, end: str = "", calendar: str = "", location: str = "", notes: str = "", link: str = ""
 ) -> str:
     """Create an event. A date-only start makes an all-day event. end: HH:MM, a datetime, or a last date; default 1 hour.
+    calendar: only if the user named one; otherwise it is chosen for you.
     link: the source URL (e.g. the RSS item's); a link already in the calendar or tasks is never added twice."""
     link = _source(link)
     if link and (existing := await _already_added(link)):
         return existing
     begin = parse_when(start, "start")
     finish = _parse_end(end, begin)
+    matched = ""
+    if not calendar.strip():
+        calendar, matched = _route(title, location, notes, link)
     collection = await dav.target("VEVENT", calendar, DEFAULT_CALENDAR)
     uid = str(uuid.uuid4()).upper()
     event = Event()
@@ -514,7 +562,8 @@ async def event_add(
     href = f"{collection.href}{uid}.ics"
     await dav.put(href, _wrap(event))
     sid = dav.remember(uid, href)
-    return f"Created [{sid}] {title.strip()}: {_describe(begin, finish)} in {collection.name}."
+    why = f" (matched {matched!r})" if matched else ""
+    return f"Created [{sid}] {title.strip()}: {_describe(begin, finish)} in {collection.name}{why}."
 
 
 @tool(calendar_server, kind="write", service="Nextcloud")
