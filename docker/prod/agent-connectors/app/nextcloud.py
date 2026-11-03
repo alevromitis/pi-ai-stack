@@ -90,7 +90,9 @@ def _parse_rules(spec: str) -> list[tuple[str, list[str]]]:
 # NEXTCLOUD_DEFAULT_CALENDAR.
 CALENDAR_RULES = _parse_rules(os.environ.get("NEXTCLOUD_CALENDAR_RULES", ""))
 
-_headers = {"User-Agent": "agent-connectors", "OCS-APIRequest": "true"}
+# Uncompressed: AIO's Apache appends "-gzip" to the ETag of a gzipped
+# response, and that ETag never matches in If-Match (every edit got 412).
+_headers = {"User-Agent": "agent-connectors", "OCS-APIRequest": "true", "Accept-Encoding": "identity"}
 if HOST:
     _headers["Host"] = HOST
 http = httpx.AsyncClient(auth=(USER, PASSWORD), timeout=30, headers=_headers)
