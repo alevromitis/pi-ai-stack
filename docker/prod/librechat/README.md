@@ -185,23 +185,24 @@ gives the model `searxng_web_search` (queries `searxng-1:8080`) and
 
 Model specs, one per task, each attaching only the servers it needs:
 
-| Spec | MCP servers | Tool-schema cost |
-|---|---|---|
-| `pi-agent` (default) | `searxng`, `shell` | ~0.5k tokens |
-| `pi-browser` | `playwright` | ~4.3k tokens (~2 min extra per call) |
-| `pi-files` | `filesystem`, `shell` | ~2.2k tokens |
-| `pi-organiser` | `calendar`, `tasks`, `notes` | ~1.2k tokens |
-| `pi-feeds` | `freshrss`, `calendar-add` | ~1k tokens |
+| Spec | Model | MCP servers | Tool-schema cost |
+|---|---|---|---|
+| `qwen-chat` (soft default) | Qwen3.5-9B | `wikipedia-large`, `searxng-large`, `calc`, `sandbox` | ~2.5k tokens, ~2-3 s of GPU prefill |
+| `qwen-organiser` (*Qwen Organiser*) | Qwen3.5-9B | `calendar`, `tasks`, `notes`, `freshrss`, `calc` | ~2k tokens, ~2 s of GPU prefill |
+| `pi-chat` | gemma4-e2b | none (add from the input bar) | — |
+| `pi-calendar` (*Calendar*) | gemma4-e2b | `calendar`, `tasks`, `freshrss` | ~1.2k tokens |
 
-`pi-organiser` and `pi-feeds` put `Today is {{current_date}}` in the prompt
-(LibreChat fills it in, in the user's time zone): the model can't place
-"tomorrow" or "Friday" without it, and it changes only once a day, so the
-prefix cache survives. `pi-feeds` reads FreshRSS and files dated items into
-Nextcloud through the add-only `calendar-add` endpoint, passing each item's
-link so nothing is filed twice (see [agent-connectors](../agent-connectors/README.md)).
+The earlier `pi-agent`, `pi-browser`, `pi-files`, `pi-organiser` and
+`pi-feeds` went in the config reset of 2026-10-07 (7200cfa);
+`pi-calendar` (2026-11-02) took over the last two jobs.
+
+The specs put `Today is {{current_date}}` in the prompt (LibreChat fills it
+in, in the user's time zone): the model can't place "tomorrow" or "Friday"
+without it, and it changes only once a day, so the prefix cache survives.
 
 Active: `searxng` (Web Search), `wikipedia`
-([Wikipedia](../agent-tools/README.md#wikipedia-mcp-wikipedia)), `calc`
+([Wikipedia](../agent-tools/README.md#wikipedia-mcp-wikipedia)), their
+Qwen-sized `searxng-large` and `wikipedia-large` (since 2026-11-06), `calc`
 ([Calculator](../agent-tools/README.md#calculator-mcp-calc)), `translate`,
 `playwright` (Playwright Browser), `sandbox` (Debian Sandbox) and, since
 2026-11-02, `freshrss`, `calendar`, `tasks` and `notes`
@@ -218,6 +219,15 @@ rejected). Everything else is under `allow`. The `pi-calendar` spec
 (*Calendar*) is the calendar agent: LiteRT-LM with `calendar`, `tasks` and
 `freshrss`; the connector picks the calendar (`NEXTCLOUD_CALENDAR_RULES`),
 not the model.
+
+**Qwen's two specs** (2026-11-06) are split on purpose. `qwen-chat`
+reads the web and runs a sandbox with internet, neither behind approval;
+`qwen-organiser` holds the calendar, tasks and notes. In one chat, a page
+or feed item could tell the model to read a note and put it in a URL it
+fetches. Apart, the web chat holds no personal data beyond saved
+memories, and the organiser's only way out is a write the user approves.
+The Qwen-sized `wikipedia-large` and `searxng-large` are described in
+[agent-tools](../agent-tools/README.md); keep them off the Pi specs.
 
 LibreChat cannot filter individual MCP tools in config; for finer cuts
 build an agent in the UI and tick only the tools it needs.

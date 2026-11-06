@@ -12,6 +12,7 @@ Wikipedia, is (`http://rpi.<tailnet>.ts.net:8090`), so the links in
 | `mcp-shell-1` (disabled 2026-10-13, Compose profile `disabled`) | [`mcp-shell-server`](https://github.com/tumf/mcp-shell-server) 1.1.12 via `supergateway` | internal only | `/workspace`; commands in `SHELL_ALLOW_COMMANDS` |
 | `mcp-filesystem-1` (disabled 2026-10-13) | `@modelcontextprotocol/server-filesystem` via `supergateway` | internal only | `/workspace` |
 | `mcp-searxng-1` | [`mcp-searxng`](https://github.com/ihor-sokoliuk/mcp-searxng) 2.5.1 (upstream image) | internal + `agent-tools-egress` + `searxng-external` | `searxng-1:8080`; the internet (`web_url_read`) |
+| `mcp-searxng-large-1` | the same image, sized for Qwen (full schemas, larger budgets) | the same | the same |
 | `mcp-playwright-1` | [Playwright MCP](https://github.com/microsoft/playwright-mcp) 0.0.82, headless Chromium | internal + `agent-tools-egress` | the internet (and, via Docker NAT, the LAN); writes to `/workspace/playwright` |
 | `mcp-wikipedia-1` | `wikipedia/server.py` (this repo; libzim 3.13, mcp 2.3) | internal only | `${WIKIPEDIA_ZIM_DIR}`, read-only |
 | `mcp-calc-1` | `calc/server.py` (this repo; mcp 2.3) | internal only | nothing |
@@ -58,6 +59,17 @@ file): `SEARXNG_LITE_TOOLS` (query/url-only schemas), 5 results of ≤300
 chars, `web_url_read` capped at 6000 chars (~1.5k tokens), English default.
 Every token the tools return is prefilled on the Pi's CPU, so these caps
 are the main latency lever.
+
+**`mcp-searxng-large` for Qwen** (since 2026-11-06; LibreChat's
+`searxng-large`, attached by `qwen-chat`): the same image with the full
+schemas (`time_range`, `language`, `pageno`; `web_url_read` with
+`startChar`/`maxLength` paging, `section` and `readHeadings`), 10 results
+of ≤600 chars, and pages 16000 chars (~4k tokens) by default.
+`URL_READ_MAX_CHARS` is only the default there: a model that passes a
+larger `maxLength` gets more. Qwen prefills ~1000 tok/s on the
+workstation GPU, so the bigger budgets cost it seconds, not minutes; a
+second container (~60 MB) keeps `mcp-searxng-1`'s output for Gemma
+unchanged.
 
 **What `gemma4-e2b` doesn't see** (`patches/hide_tools.py` in litert-lm):
 every tool schema is prefilled into the system-prompt snapshot, and a new
@@ -174,6 +186,22 @@ built. With thinking off, Gemma skipped searching for 13/44 questions it
 thought it knew, and no answer in the end-to-end run
 cited its link.
 
+**`/large/mcp`, for Qwen** (since 2026-11-06; LibreChat's
+`wikipedia-large`, attached by `qwen-chat`). The same process and open
+ZIM serve a second endpoint, so it costs no memory:
+
+* `wikipedia_search` with the same steps but 10 passages of ≤1200
+  characters from the top 5 articles (`WIKIPEDIA_LARGE_RESULTS`,
+  `_ARTICLES`, `_PASSAGE_CHARS`): ≤12k characters, ~3k tokens.
+* `wikipedia_read(title, section?)`: an article's lead (with its infobox),
+  or one section with its subsections, cut at `WIKIPEDIA_READ_CHARS`
+  (12000), then the article's list of sections and a Sources line. A title
+  that isn't an article falls back to the best search match. Use: a
+  passage cut short, or an answer in a section the search didn't rank.
+
+`/mcp` is unchanged: its tool list and the output of 8 test searches were
+byte-identical before and after (2026-11-06, workstation copy of the ZIM).
+
 **Updating the snapshot.** Kiwix publishes new `nopic` builds every few
 months. Download the new file and its `.sha256` next to the old one, check
 it, set `WIKIPEDIA_ZIM_FILE` in `.env` (and `make encrypt`), `make up`,
@@ -210,9 +238,11 @@ per-letter tally, a call without `find` still ended in "2".
 Added 2026-10-13, reversing the 2026-10-12 English-only decision. The
 models work best in English, and Wikipedia is English-only. So for a message
 in another language the model translates it into English, thinks and
-searches in English, then translates its answer back. Both prompts
-(qwen-chat, pi-chat) say so. qwen-chat has the tool on; for pi-chat add it
-from the input bar.
+searches in English, then translates its answer back. pi-chat's prompt
+says so; add the tool from the input bar (litert-lm also translates by
+itself, below). Since 2026-11-06 qwen-chat no longer attaches it: Qwen
+writes Greek itself, and better (it kept "πόδια" as legs, which Argos
+turned into "feet"); its prompt says to answer in the user's language.
 
 * One tool, `translate(text, target="en", source="")`. When `source` is
   empty, the language is detected (py3langid, limited to the installed

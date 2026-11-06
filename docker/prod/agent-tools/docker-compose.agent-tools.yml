@@ -21,7 +21,9 @@ name: agent-tools
 #   mcp-filesystem  :8000  read/write confined to /workspace (disabled)
 #   mcp-playwright  :8931  headless Chromium; files to /workspace/playwright
 #   mcp-searxng     :8080  web search via searxng-1 + web_url_read (no workspace)
-#   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only
+#   mcp-searxng-large :8080  the same, full tools and larger budgets, for Qwen
+#   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only;
+#                          /mcp for gemma4-e2b, /large/mcp for Qwen
 #   mcp-calc        :8000  arithmetic, dates, letter counts; internal only
 #   mcp-translate   :8000  offline translation (Argos models); internal only
 #   kiwix-serve     :8080  the same ZIM as web pages, published ${KIWIX_PORT}
@@ -186,7 +188,7 @@ services:
     volumes:
       - ${AGENT_WORKSPACE_DIR:?set AGENT_WORKSPACE_DIR in .env}:/workspace
 
-  mcp-searxng:
+  mcp-searxng: &searxng
     <<: *sandbox
     # Pinned (TAG in .env). Was an npx child of librechat-1; here it fetches
     # untrusted pages without sharing a container with LibreChat's secrets.
@@ -226,6 +228,26 @@ services:
       searxng:
         priority: 10
 
+  # The same server sized for Qwen (47k window, ~1k tok/s prefill on the
+  # workstation GPU): full tool schemas (time_range, language, page number;
+  # web_url_read pages long pages with startChar/maxLength, reads one
+  # section, or lists headings), 10 results of 600 chars, pages 16k chars
+  # (~4k tokens) by default. A second container, ~60 MB.
+  mcp-searxng-large:
+    <<: *searxng
+    container_name: mcp-searxng-large-1
+    environment:
+      SEARXNG_URL: http://searxng-1:8080
+      MCP_HTTP_PORT: "8080"
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_ALLOWED_HOSTS: mcp-searxng-large-1:8080
+      SEARXNG_LITE_TOOLS: "false"
+      SEARXNG_MAX_RESULTS: "10"
+      SEARXNG_MAX_RESULT_CHARS: "600"
+      # The default only: the model may ask for more with maxLength.
+      URL_READ_MAX_CHARS: "16000"
+      SEARXNG_DEFAULT_LANGUAGE: en
+
   mcp-wikipedia:
     <<: *sandbox
     build:
@@ -244,6 +266,13 @@ services:
       WIKIPEDIA_RESULTS: "5"
       WIKIPEDIA_ARTICLES: "3"
       WIKIPEDIA_PASSAGE_CHARS: "500"
+      # /large/mcp, for Qwen: 10 passages of <=1200 chars from the top 5
+      # articles (<=12k chars, ~3k tokens) and wikipedia_read, an article's
+      # lead or one section, <=12k chars. Same process, same open ZIM.
+      WIKIPEDIA_LARGE_RESULTS: "10"
+      WIKIPEDIA_LARGE_ARTICLES: "5"
+      WIKIPEDIA_LARGE_PASSAGE_CHARS: "1200"
+      WIKIPEDIA_READ_CHARS: "12000"
       # Each passage's link: the article on kiwix-serve below, not on
       # en.wikipedia.org, so it matches the snapshot the answer came from.
       WIKIPEDIA_LINK_BASE: ${WIKIPEDIA_LINK_BASE:?set WIKIPEDIA_LINK_BASE in .env}

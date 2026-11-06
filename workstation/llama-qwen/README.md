@@ -25,9 +25,16 @@ fallback: while the workstation is off, Qwen chats fail, and you switch to
 the LiteRT-LM spec or an E2B preset by hand. The unit runs only while the
 user is logged in; `loginctl enable-linger` would keep it up without a login.
 
+* **History.** Disabled 2026-10-31 at the user's request (the kernel's OOM
+  killer had also taken it on 2026-10-30 and 10-31: ~5.2 GB host RAM peak,
+  `OOMScoreAdjust=500`); enabled again 2026-11-06.
 * **Defaults.** The `qwen-chat` spec is the soft default: first chats, and
-  chats after clearing. It attaches Wikipedia, web search and the calculator;
-  the browser and sandbox are added from the input bar. The MongoDB preset
+  chats after clearing. It attaches the Qwen-sized Wikipedia and web search
+  (`wikipedia-large`, `searxng-large`: longer passages, whole sections,
+  paged web pages), the calculator and the Debian sandbox; Playwright and
+  translate are added from the input bar. `qwen-organiser` is Qwen with the
+  calendar, tasks, notes and feeds, kept apart from the web tools (see the
+  comment in `librechat.yaml`). The MongoDB preset
   **Qwen 9B - Thinker** is a copy of it and is the user's default preset.
   LibreChat's own default-preset path ignores the spec, and presets carry no
   MCP selection. The memory agent stays on LiteRT-LM, whose memory gate
@@ -38,5 +45,8 @@ user is logged in; `loginctl enable-linger` would keep it up without a login.
   answers.
 * **Context.** 49152 Qwen tokens server-side; 64k left the desktop too
   little VRAM (decode fell to 20 tok/s). `tokenConfig` and the spec set
-  47104, with `max_tokens: 32768` for the reply, thinking included (Qwen's
-  recommended output length), so history gets up to 14336.
+  47104. `qwen-chat` gives the reply `max_tokens: 20480`, thinking included,
+  so history and tool results get up to 26624 (`qwen-organiser`: 16384 and
+  30720). It was Qwen's recommended 32768 until 2026-11-06, which left
+  14336: too little for the larger tools (~3-4k tokens a call). Hard maths
+  took 8-14k tokens on this card (2026-10-10).

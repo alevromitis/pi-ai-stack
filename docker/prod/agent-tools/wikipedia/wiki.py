@@ -512,3 +512,60 @@ def render(query: str, passages: list[Passage], date: str, results: int, chars: 
     links = ", ".join(f"[{title}]({page_url(link_base, path)})" for path, title in articles)
     lines.append(f"\nEnd your answer with this line:\nSources: {links}")
     return "\n".join(lines)
+
+
+def article(wiki: Wiki, title: str) -> tuple[str, str, list[Section]] | None:
+    """(path, title, sections) of the article with this title, else of the
+    best search match; None if nothing matches. For wikipedia_read."""
+    path = "_".join(title.split())
+    for candidate in (path, path[:1].upper() + path[1:]):
+        try:
+            entry = wiki._resolve(candidate)
+            break
+        except KeyError:
+            continue
+    else:
+        found = wiki.candidates(title, limit=1)
+        if not found:
+            return None
+        entry = wiki._resolve(found[0][0])
+    html = bytes(entry.get_item().content).decode("utf-8", "replace")
+    return entry.path, entry.title, sections(html)
+
+
+def render_article(found: tuple[str, str, list[Section]], section: str, date: str, chars: int, link_base: str) -> str:
+    """An article's lead (or one section, with its subsections), cut at
+    `chars`, then the list of its sections and a Sources line."""
+    path, title, parts = found
+    heads = [s.title for s in parts if s.title]
+    lines = [f"Wikipedia (offline copy, {date[:7]}): {title}"]
+    chosen: list[Section] = []
+    if section:
+        want = fold(section)
+        match = [i for i, s in enumerate(parts) if s.title and fold(s.title) == want]
+        match = match or [i for i, s in enumerate(parts) if s.title and want in fold(s.title)]
+        if match:
+            start = match[0]
+            chosen = [parts[start]]
+            for s in parts[start + 1 :]:
+                if s.level <= parts[start].level:
+                    break
+                chosen.append(s)
+        else:
+            lines.append(f'No section "{section}" in this article.')
+    else:
+        chosen = [s for s in parts[:1] if not s.title]
+    body = "\n\n".join(
+        "\n".join(([f"{'#' * s.level} {s.title}"] if s.title else []) + (["\n\n".join(s.paras)] if s.paras else []))
+        for s in chosen
+    ).strip()
+    if len(body) > chars:
+        cut = body[:chars]
+        stop = cut.rfind("\n\n")
+        body = (cut[:stop] if stop > chars * 0.6 else cut.rstrip()) + f"\n\n… (cut at {chars} characters: read a smaller section for the rest)"
+    if body:
+        lines.append("\n" + body)
+    if heads:
+        lines.append("\nSections: " + "; ".join(heads))
+    lines.append(f"\nSources: [{title}]({page_url(link_base, path)})")
+    return "\n".join(lines)
