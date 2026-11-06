@@ -22,6 +22,7 @@ existing one instead of inventing "Shopping List". A list or calendar
 created later needs a restart to appear there.
 """
 
+import copy
 import hashlib
 import os
 import re
@@ -469,7 +470,8 @@ def _refuse_if_invited(event, action: str) -> None:
 async def events(
     start: str = "today", days: int = 7, calendar: str = "", query: str = "", details: bool = False, full: bool = False
 ) -> str:
-    """List calendar events from start (a date or 'today') for a number of days, with ids. query: only events whose
+    """List calendar events from start for a number of days, with ids. Dates here and in every tool may be words:
+    'today', 'wednesday', 'next tuesday 10:00', '+3d' (the server works out the date). query: only events whose
     title, place or notes contain all these words (days may then be up to 366). details adds notes, cut to 300
     characters; full gives them whole, line breaks kept (read them before replacing notes with event_edit)."""
     first = parse_when(start, "start")
@@ -515,6 +517,8 @@ async def events(
             line += f" · {cal_name}"
         if "RECURRENCE-ID" in event or "RRULE" in event:
             line += " · repeats"
+        if str(event.get("STATUS", "")).upper() == "CANCELLED":
+            line += " · CANCELLED"
         lines.append(line)
         if (details or full) and event.get("DESCRIPTION"):
             text = str(event["DESCRIPTION"])
@@ -572,7 +576,8 @@ def _route(title: str, location: str, notes: str, link: str) -> tuple[str, str]:
 async def event_add(
     title: str, start: str, end: str = "", calendar: str = "", location: str = "", notes: str = "", link: str = ""
 ) -> str:
-    """Create an event. A date-only start makes an all-day event. end: HH:MM, a datetime, or a last date; default 1 hour.
+    """Create an event. start: a date, datetime or words ('next tuesday 10:00'); a date-only start makes an all-day
+    event. end: HH:MM, a datetime, or a last date; default 1 hour.
     calendar: only if the user named one; otherwise it is chosen for you.
     link: the source URL (e.g. the RSS item's); a link already in the calendar or tasks is never added twice."""
     link = _source(link)
@@ -614,18 +619,93 @@ async def event_add(
     return f"Created [{sid}] {title.strip()}: {_describe(begin, finish)} in {collection.name}{why}."
 
 
+async def _occurrence(found: Found, master, day: date):
+    """The expanded instance of a repeating event on day (Nextcloud computes
+    the recurrence), or a refusal naming the days it does fall on."""
+    uid = str(master["UID"])
+    window = (start_of(day), start_of(day + timedelta(days=1)))
+    collection = found.collection or next(iter(await dav.of("VEVENT")))
+    for hit in await dav.report(collection, calendar_query("VEVENT", *window, expand=True, match=("UID", uid))):
+        for instance in hit.ical.walk("VEVENT"):
+            if str(instance.get("UID", "")) == uid and "RECURRENCE-ID" in instance:
+                return instance
+    raise ToolError(f"It doesn't occur on {fmt_day(day)}; list events to see its dates.")
+
+
+def _recurrence_id(master, instance) -> date | datetime:
+    """RECURRENCE-ID in the master's own form (its TZID, or a date)."""
+    rid = instance.decoded("RECURRENCE-ID")
+    first = master.decoded("DTSTART")
+    if not isinstance(first, datetime):
+        return rid.date() if isinstance(rid, datetime) else rid
+    if isinstance(rid, datetime) and first.tzinfo is not None:
+        return rid.astimezone(first.tzinfo)
+    return rid
+
+
 @tool(calendar_server, kind="write", service="Nextcloud")
-async def event_edit(id: str, title: str = "", start: str = "", end: str = "", location: str = "", notes: str = "") -> str:
-    """Change an event by id. Give only what changes; 'none' clears location or notes. Moving start keeps the length."""
+async def event_edit(
+    id: str,
+    title: str = "",
+    start: str = "",
+    end: str = "",
+    location: str = "",
+    notes: str = "",
+    occurrence: str = "",
+    cancel: bool = False,
+    all_occurrences: bool = False,
+) -> str:
+    """Change an event by id. Give only what changes; 'none' clears location or notes. Moving start keeps the length.
+    cancel=true marks it cancelled (it stays visible, struck through). For a repeating event give occurrence (the date
+    of the one to change, e.g. 'monday', '2026-11-09') or all_occurrences=true to change every one (not their time)."""
     found = await dav.find(id, "VEVENT")
     event = _master(found.ical, "VEVENT")
     if found.collection is not None and not found.collection.writable:
         raise ToolError(f"{found.collection.name} is read-only.")
     _refuse_if_invited(event, "change")
+    repeating = "RRULE" in event or "RDATE" in event or len(list(found.ical.walk("VEVENT"))) > 1
+    changes = any(v.strip() for v in (title, start, end, location, notes)) or cancel
+    if not changes:
+        raise ToolError("Nothing to change: give title, start, end, location, notes or cancel.")
+    if repeating and not occurrence.strip() and not all_occurrences:
+        raise ToolError(
+            "This event repeats. Give occurrence (the date of the one to change) or all_occurrences=true to change every one."
+        )
+    target, what = event, ""
+    if occurrence.strip():
+        day = parse_when(occurrence, "occurrence")
+        day = day.date() if isinstance(day, datetime) else day
+        if repeating:
+            instance = await _occurrence(found, event, day)
+            rid = _recurrence_id(event, instance)
+            target = next(
+                (c for c in found.ical.walk("VEVENT") if "RECURRENCE-ID" in c and c.decoded("RECURRENCE-ID") == rid),
+                None,
+            )
+            if target is None:
+                # A per-occurrence override: the master's fields at this date.
+                target = Event()
+                for key, value in event.property_items(recursive=False):
+                    if key not in ("BEGIN", "END", "RRULE", "RDATE", "EXDATE", "DTSTART", "DTEND", "DURATION", "SEQUENCE"):
+                        target.add(key, value)
+                begin, finish = _span(instance)
+                for sub in event.subcomponents:  # its reminders
+                    target.add_component(copy.deepcopy(sub))
+                target.add("RECURRENCE-ID", rid)
+                target.add("DTSTART", begin if isinstance(begin, datetime) else begin)
+                target.add("DTEND", finish)
+                found.ical.add_component(target)
+            what = f" (only {fmt_day(day)})"
+        else:
+            begin, _ = _span(event)
+            if (begin.date() if isinstance(begin, datetime) else begin) != day:
+                raise ToolError(f"This event is on {fmt_day(begin if not isinstance(begin, datetime) else begin.date())}, not {fmt_day(day)}.")
+    elif repeating:
+        what = " (every occurrence)"
     if start or end:
-        if "RRULE" in event or len(list(found.ical.walk("VEVENT"))) > 1:
-            raise ToolError("This is a repeating event; change its time in Nextcloud Calendar.")
-        old_begin, old_end = _span(event)
+        if repeating and not occurrence.strip():
+            raise ToolError("Moving every occurrence of a repeating event isn't possible here; give occurrence to move one, or change it in Nextcloud Calendar.")
+        old_begin, old_end = _span(target)
         begin = parse_when(start, "start") if start else old_begin
         if end:
             finish = _parse_end(end, begin)
@@ -633,20 +713,22 @@ async def event_edit(id: str, title: str = "", start: str = "", end: str = "", l
             finish = begin + (old_end - old_begin)
         else:
             finish = _parse_end("", begin)
-        _replace(event, "DTSTART", begin)
-        _replace(event, "DTEND", finish)
-        event.pop("DURATION", None)
+        _replace(target, "DTSTART", begin)
+        _replace(target, "DTEND", finish)
+        target.pop("DURATION", None)
     if title.strip():
-        _replace(event, "SUMMARY", title.strip())
+        _replace(target, "SUMMARY", title.strip())
     for field, value in (("LOCATION", location), ("DESCRIPTION", notes)):
         if value.strip():
-            _replace(event, field, None if _cleared(value) else value.strip())
-    _touch(event)
-    _add_timezones(found.ical, event)
+            _replace(target, field, None if _cleared(value) else value.strip())
+    if cancel:
+        _replace(target, "STATUS", "CANCELLED")
+    _touch(target)
+    _add_timezones(found.ical, target)
     await dav.put(found.href, found.ical, found.etag)
-    begin, finish = _span(event)
-    series = " (repeating; first occurrence)" if "RRULE" in event else ""
-    return f"Updated [{short_id(str(event['UID']))}] {event.get('SUMMARY', '')}: {_describe(begin, finish)}{series}."
+    begin, finish = _span(target)
+    state = ", cancelled" if str(target.get("STATUS", "")).upper() == "CANCELLED" else ""
+    return f"Updated [{short_id(str(event['UID']))}] {target.get('SUMMARY', '')}: {_describe(begin, finish)}{what}{state}."
 
 
 @tool(calendar_server, kind="delete", service="Nextcloud")
@@ -768,7 +850,7 @@ def _priority(value: str) -> int | None:
 async def task_add(
     title: str, due: str = "", list: str = "", notes: str = "", priority: str = "", parent: str = "", link: str = ""
 ) -> str:
-    """Add a task. due: a date or datetime. priority: high, medium or low. parent: id of a task to nest it under.
+    """Add a task. due: a date, datetime or words ('friday', '+2w', 'sunday 18:00'). priority: high, medium or low. parent: id of a task to nest it under.
     link: the source URL (e.g. the RSS item's); a link already in the calendar or tasks is never added twice."""
     link = _source(link)
     if link and (existing := await _already_added(link)):
@@ -980,6 +1062,8 @@ async def find(query: str, past_days: int = 30) -> str:
         if event.get("LOCATION"):
             line += f" @ {one_line(str(event['LOCATION']), 80)}"
         line += f" · {cal_name}"
+        if str(event.get("STATUS", "")).upper() == "CANCELLED":
+            line += " · CANCELLED"
         if len(occurrences) > 1 or "RRULE" in event or "RECURRENCE-ID" in event:
             line += f" · repeats ({len(occurrences)} in range{', next shown' if upcoming else ', last shown'})"
         event_hits.append((score, not upcoming, _local_start(begin), line))

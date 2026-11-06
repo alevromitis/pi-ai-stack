@@ -80,8 +80,15 @@ empty as in the image. Nothing in this stack changes for it.
   rescan; a full UID always works. Notes and RSS items use Nextcloud's and
   FreshRSS's own ids.
 * **Recurring events** are expanded server-side in listings. `event_edit`
-  changes a series' title, location or notes but refuses to move it, and a
-  delete removes the whole series.
+  on a repeating event needs either `occurrence` (a date, words allowed:
+  "monday") or `all_occurrences=true`; without one it refuses, so "cancel
+  Monday's lecture" can't mark every Monday (Qwen did that in 3 of 4 test
+  runs on 2026-11-06). `occurrence` writes a standard per-date override
+  (`RECURRENCE-ID` in the series' own TZID, the series' fields and
+  reminders copied) and may move that one date; `cancel=true` sets
+  `STATUS:CANCELLED` (Nextcloud shows it struck through; listings say
+  CANCELLED). A whole series can't be moved here, and a delete removes the
+  whole series.
 * **Events with attendees** cannot be edited or deleted here: Nextcloud
   would email the attendees.
 * **Filed once per link.** `event_add` and `task_add` take `link` (the RSS
