@@ -165,13 +165,13 @@ mcpServers:
   wikipedia-large:
     type: streamable-http
     url: 'http://mcp-wikipedia-1:8000/large/mcp'
-    title: 'Wikipedia (large)'
+    title: 'Wikipedia Large'
     description: 'Offline English Wikipedia for Qwen: longer passages, whole sections.'
     timeout: 30000
   searxng-large:
     type: streamable-http
     url: 'http://mcp-searxng-large-1:8080/mcp'
-    title: 'Web Search (large)'
+    title: 'Web Search Large'
     description: 'SearXNG search and page reading for Qwen: more results, longer pages.'
     timeout: 60000
   # Offline translation (Argos models in agent-tools, no network): one
