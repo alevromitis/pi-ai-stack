@@ -11,9 +11,9 @@ Wikipedia, is (`http://rpi.<tailnet>.ts.net:8090`), so the links in
 |---|---|---|---|
 | `mcp-shell-1` (disabled 2026-10-13, Compose profile `disabled`) | [`mcp-shell-server`](https://github.com/tumf/mcp-shell-server) 1.1.12 via `supergateway` | internal only | `/workspace`; commands in `SHELL_ALLOW_COMMANDS` |
 | `mcp-filesystem-1` (disabled 2026-10-13) | `@modelcontextprotocol/server-filesystem` via `supergateway` | internal only | `/workspace` |
-| `mcp-searxng-1` | [`mcp-searxng`](https://github.com/ihor-sokoliuk/mcp-searxng) 2.5.1 (upstream image) | internal + `agent-tools-egress` + `searxng-external` | `searxng-1:8080`; the internet (`web_url_read`) |
+| `mcp-searxng-1` | [`mcp-searxng`](https://github.com/ihor-sokoliuk/mcp-searxng) 2.10.0 (upstream image) | internal + `agent-tools-egress` + `searxng-external` | `searxng-1:8080`; the internet (`web_url_read`) |
 | `mcp-searxng-large-1` | the same image, sized for Qwen (full schemas, larger budgets) | the same | the same |
-| `mcp-playwright-1` | [Playwright MCP](https://github.com/microsoft/playwright-mcp) 0.0.82, headless Chromium | internal + `agent-tools-egress` | the internet (and, via Docker NAT, the LAN); writes to `/workspace/playwright` |
+| `mcp-playwright-1` | [Playwright MCP](https://github.com/microsoft/playwright-mcp) 0.0.83, headless Chromium | internal + `agent-tools-egress` | the internet (and, via Docker NAT, the LAN); writes to `/workspace/playwright` |
 | `mcp-wikipedia-1` | `wikipedia/server.py` (this repo; libzim 3.13, mcp 2.3) | internal only | `${WIKIPEDIA_ZIM_DIR}`, read-only |
 | `mcp-calc-1` | `calc/server.py` (this repo; mcp 2.3) | internal only | nothing |
 | `mcp-translate-1` | `translate/server.py` (this repo; CTranslate2 + Argos models) | internal only | `${TRANSLATE_MODELS_DIR}` (`/mnt/external/argos-models`), read-only |
@@ -78,7 +78,7 @@ hide single tools, so litert-lm drops `searxng_search_suggestions` and
 `searxng_instance_info` (`LITERT_HIDE_TOOLS`) and replaces `web_url_read`'s
 description with "Read a web page or file by URL, as markdown."
 (`LITERT_TOOL_DESCRIPTIONS`). Qwen still gets all of them unchanged. The
-original description (mcp-searxng 2.5.1):
+original description (mcp-searxng 2.5.1, unchanged in 2.10.0):
 
 > Fetch URL. Converts HTML to markdown; returns explicit JSON, plain text,
 > YAML, TOML, and XML as readable markdown; supports bounded PDF text

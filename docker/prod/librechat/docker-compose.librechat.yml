@@ -125,9 +125,9 @@ services:
 #      - /run:exec
 
   mongodb:
-    # digest for 8.0.20:
-    #   sha256:098862b1339f031900ca66cf8fef799e616d6324fa41b9a263f2ec899552c1ef
-    image: mongo:${MONGO_TAG:-8.0.20}
+    # digest for 8.0.34:
+    #   sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+    image: mongo:${MONGO_TAG:-8.0.34}
     container_name: librechat-mongodb-1
     restart: unless-stopped
     # Data dir must be chown 1000:1000 before first start (matches upstream).

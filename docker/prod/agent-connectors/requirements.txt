@@ -9,4 +9,4 @@ uvicorn==0.54.0
 pypdf==6.19.0
 # zoneinfo reads only this (PYTHONTZPATH is empty in the image): a pinned,
 # complete tz database, so generated VTIMEZONEs carry every DST transition.
-tzdata==2026.5
+tzdata==2026.6
