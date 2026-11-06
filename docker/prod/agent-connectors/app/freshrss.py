@@ -275,4 +275,4 @@ async def rss_subscribe(url: str, category: str = "") -> str:
 
 
 if __name__ == "__main__":
-    serve({"freshrss": mcp})
+    serve({"freshrss": mcp}, name="freshrss")

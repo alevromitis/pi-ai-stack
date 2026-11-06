@@ -15,6 +15,9 @@ name: agent-connectors
 #   mcp-freshrss   :8000  /freshrss/mcp                         -> freshrss-1:80
 #   mcp-nextcloud  :8000  /calendar/mcp /tasks/mcp /notes/mcp   -> nextcloud-aio-apache:11000
 #                         /calendar-add/mcp (list + add only, for feed agents)
+#                         /lookup/mcp (find: one search over all three)
+#   mcp-mail       :8000  /mail/mcp  read + save drafts, no sending -> IMAP over mail-egress
+#                         (Compose profile "mail": starts once .env.mcp-mail exists)
 #
 # Disabled 2026-10-13 to free RAM, back on 2026-11-02 for the calendar
 # agent (LibreChat asks before every write: endpoints.agents.toolApproval).
@@ -95,6 +98,29 @@ services:
       connectors:
         priority: 50
 
+  mcp-mail:
+    <<: *connector
+    # Off until the mailbox's credentials are in .env.mcp-mail (from the
+    # .sops copy): `docker compose --profile mail up -d mcp-mail`, or
+    # COMPOSE_PROFILES=mail in .env.
+    profiles: ["mail"]
+    image: agent-connectors-mcp:local
+    container_name: mcp-mail-1
+    depends_on:
+      mcp-freshrss:
+        condition: service_started
+    command: ["python", "mail.py"]
+    env_file:
+      - .env.mcp-mail
+    environment:
+      MCP_ALLOWED_HOSTS: mcp-mail-1:8000
+      TZ: ${TZ:-UTC}
+    networks:
+      mail:
+        priority: 100
+      connectors:
+        priority: 50
+
 networks:
   connectors:
     name: agent-connectors-internal
@@ -113,3 +139,11 @@ networks:
     # Owned by Nextcloud AIO (not in this repo). Declared external so we join it.
     name: ${NEXTCLOUD_NETWORK:-nextcloud-aio}
     external: true
+  mail:
+    # mcp-mail's way out to the IMAP server (not internal). Only that
+    # container joins it.
+    name: agent-connectors-mail-egress
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.89.21.0/24

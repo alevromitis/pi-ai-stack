@@ -4,6 +4,9 @@ Config from the environment, the tool decorator (read-only / delete gating,
 compact schemas, upstream errors turned into short messages for the model),
 date parsing in local time, text trimming, and the HTTP app: Streamable
 HTTP, stateless, JSON responses, several servers mounted under one port.
+With MCP_TRANSPORT=stdio, a process serves all its tools as one server on
+stdin/stdout instead, for a client that spawns it (Claude Code on the
+workstation).
 """
 
 import contextlib
@@ -132,36 +135,79 @@ def tool(*servers: MCPServer, kind: str = "read", service: str = "upstream") -> 
 
 _WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 _TIME = re.compile(r"^(\d{1,2}):(\d{2})$")
-DATE_HELP = "Use YYYY-MM-DD, YYYY-MM-DDTHH:MM, 'today', 'tomorrow' or a weekday, optionally followed by HH:MM."
+# "9am", "5:30pm", "17h": a clock the model may copy from the user's words.
+_CLOCK_WORD = re.compile(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm|h)$")
+_OFFSET = re.compile(r"^(?:\+\s*(\d+)\s*([dw])|in\s+(\d+)\s+(day|days|week|weeks))$")
+DATE_HELP = (
+    "Use YYYY-MM-DD, YYYY-MM-DDTHH:MM, 'today', 'tomorrow', 'yesterday', a weekday ('friday', 'next friday',"
+    " 'this friday'), 'next week', '+3d', '+2w' or 'in 3 days', optionally followed by a time (HH:MM, 9am, 5pm)."
+)
 
 
 def now() -> datetime:
     return datetime.now(TZ)
 
 
+def _relative_day(words: str, today: date) -> date | None:
+    """The day a relative phrase names, or None. A bare or "next" weekday is
+    the next one after today ("friday" on a Friday means next week); "this"
+    weekday includes today. "next week" is next week's Monday."""
+    if words == "today":
+        return today
+    if words == "tomorrow":
+        return today + timedelta(days=1)
+    if words == "yesterday":
+        return today - timedelta(days=1)
+    if words == "next week":
+        return today + timedelta(days=7 - today.weekday())
+    first, _, rest = words.partition(" ")
+    if first in ("this", "next") and rest in _WEEKDAYS:
+        target = _WEEKDAYS.index(rest)
+        if first == "this":
+            return today + timedelta(days=(target - today.weekday()) % 7)
+        words = rest
+    if words in _WEEKDAYS:
+        return today + timedelta(days=(_WEEKDAYS.index(words) - today.weekday() - 1) % 7 + 1)
+    match = _OFFSET.match(words)
+    if match:
+        count = int(match[1] or match[3])
+        unit = (match[2] or match[4])[0]
+        return today + timedelta(days=count * (7 if unit == "w" else 1))
+    return None
+
+
+def _clock(text: str) -> tuple[int, int] | None:
+    match = _TIME.match(text)
+    if match:
+        hour, minute = int(match[1]), int(match[2])
+    else:
+        match = _CLOCK_WORD.match(text)
+        if not match:
+            return None
+        hour, minute, suffix = int(match[1]), int(match[2] or 0), match[3]
+        if suffix == "pm" and hour < 12:
+            hour += 12
+        elif suffix == "am" and hour == 12:
+            hour = 0
+    return (hour, minute) if hour < 24 and minute < 60 else None
+
+
 def parse_when(value: str, field: str) -> date | datetime:
     """A date (all-day) or an aware datetime in TZ, from what a model writes."""
-    text = value.strip()
+    text = " ".join(value.strip().split())
     lower = text.lower()
-    day_word, _, clock = lower.partition(" ")
     today = now().date()
-    day: date | None = None
-    if day_word == "today":
-        day = today
-    elif day_word == "tomorrow":
-        day = today + timedelta(days=1)
-    elif day_word in _WEEKDAYS:
-        # The next one after today: "friday" on a Friday means next week.
-        ahead = (_WEEKDAYS.index(day_word) - today.weekday() - 1) % 7 + 1
-        day = today + timedelta(days=ahead)
+    # A relative day, then optionally a clock: "next tuesday 10:00", "+2w 9am".
+    words, clock = lower, ""
+    parts = lower.rsplit(" ", 1)
+    if len(parts) == 2 and _clock(parts[1].removeprefix("at ")) is not None:
+        words, clock = parts[0].removesuffix(" at"), parts[1]
+    day = _relative_day(words, today)
     if day is not None:
-        clock = clock.strip()
         if not clock:
             return day
-        match = _TIME.match(clock)
-        if not match:
-            raise ToolError(f"{field}: can't read {value!r}. {DATE_HELP}")
-        return datetime(day.year, day.month, day.day, int(match[1]), int(match[2]), tzinfo=TZ)
+        hour, minute = _clock(clock)
+        return datetime(day.year, day.month, day.day, hour, minute, tzinfo=TZ)
     try:
         if len(text) == 10:
             return date.fromisoformat(text)
@@ -256,11 +302,26 @@ def new_server(name: str) -> MCPServer:
     return MCPServer(name, log_level="WARNING", warn_on_duplicate_tools=False)
 
 
-def serve(servers: dict[str, MCPServer]) -> None:
-    """Serve each server at /<path>/mcp, plus /healthz, on MCP_PORT."""
+def serve(servers: dict[str, MCPServer], name: str, on_start: Callable[[], Any] | None = None) -> None:
+    """Serve each server at /<path>/mcp, plus /healthz, on MCP_PORT; or, with
+    MCP_TRANSPORT=stdio, all their tools as one server called name.
+
+    on_start: a coroutine function run once at HTTP startup, before requests
+    (e.g. to fill tool schemas from the service); a failure is logged, not fatal."""
     # MCPServer already configured the root logger (at WARNING, which keeps
-    # the SDK quiet); one INFO line per tool call is ours.
+    # the SDK quiet); one INFO line per tool call is ours. It logs to stderr,
+    # so stdio's stdout carries only the protocol.
     log.setLevel(logging.INFO)
+    transport = os.environ.get("MCP_TRANSPORT", "http").strip().lower()
+    if transport == "stdio":
+        # One client spawns this process and gets every endpoint's tools. A
+        # tool on several servers (calendar-add's) is the same function, so
+        # one copy of each name is kept.
+        tools = {t.name: t for server in servers.values() for t in server._tool_manager.list_tools()}
+        MCPServer(name, log_level="WARNING", tools=list(tools.values())).run("stdio")
+        return
+    if transport != "http":
+        raise SystemExit(f"MCP_TRANSPORT must be http or stdio, not {transport!r}")
     # Requests come only from LibreChat, by container name. The Host allowlist
     # stops DNS rebinding; any Origin (i.e. any browser) is refused.
     security = TransportSecuritySettings(
@@ -281,6 +342,11 @@ def serve(servers: dict[str, MCPServer]) -> None:
         async with contextlib.AsyncExitStack() as stack:
             for server in servers.values():
                 await stack.enter_async_context(server.session_manager.run())
+            if on_start is not None:
+                try:
+                    await on_start()
+                except Exception as exc:  # the service may be down; serve anyway
+                    log.warning("startup hook failed: %s: %s", type(exc).__name__, exc)
             yield
 
     async def healthz(_request: Request) -> PlainTextResponse:

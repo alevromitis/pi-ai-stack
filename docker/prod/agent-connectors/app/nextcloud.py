@@ -6,15 +6,25 @@ Three MCP servers in one process, so a model spec attaches only what it needs:
   /tasks/mcp     tasks, over CalDAV (VTODO, as the Tasks app stores them)
   /notes/mcp     notes, over the Notes app's REST API v1
   /calendar-add/mcp  events and tasks: list and add only (for feed agents)
+  /lookup/mcp    find: one search over events, tasks and notes
+
+With MCP_TRANSPORT=stdio it is one server, "nextcloud", with the first
+three's tools (calendar-add's are a subset).
 
 Calendar objects are addressed by a short id, the first 8 hex digits of
 sha1(UID): a small model copies those far more reliably than a 36-character
 UID. Ids are remembered from listings; tasks can always be found again by a
 scan, events need a fresh listing after a restart. A full UID works too.
+
+At startup the calendar and task-list parameters get the user's actual
+names as their only allowed values (JSON Schema enum), so a model picks an
+existing one instead of inventing "Shopping List". A list or calendar
+created later needs a restart to appear there.
 """
 
 import hashlib
 import os
+import re
 import time
 import unicodedata
 import uuid
@@ -68,6 +78,26 @@ MAX_LISTED = 80
 def _fold(text: str) -> str:
     """Lower case without accents (and final sigma folded), for rule matching."""
     return "".join(c for c in unicodedata.normalize("NFD", text.casefold()) if not unicodedata.combining(c))
+
+
+# Words that carry no meaning in a search ("my shopping list" -> shopping, list).
+_FILLER = {"my", "the", "a", "an", "of", "for", "to", "about", "and", "or", "on", "in", "at", "with"}
+
+
+def _query_words(query: str) -> list[str]:
+    return [w for w in _fold(query).split() if w not in _FILLER]
+
+
+def _stem(word: str) -> str:
+    """A long word's start, so inflections match: "lessons" for "lesson",
+    "accounting" for "accountant", «οδήγηση» for «οδήγησης»."""
+    return word if len(word) <= 5 else word[: max(5, len(word) - 3)]
+
+
+def _score(words: list[str], text: str) -> int:
+    """How many of the (folded) query words begin a word of the text, by stem."""
+    tokens = set(re.findall(r"\w+", _fold(text)))
+    return sum(1 for w in words if any(t.startswith(_stem(w)) for t in tokens))
 
 
 def _parse_rules(spec: str) -> list[tuple[str, list[str]]]:
@@ -425,6 +455,10 @@ def _describe(begin: date | datetime, end: date | datetime) -> str:
     return f"{fmt_day(begin)} (all day)" if last <= begin else f"{fmt_day(begin)} to {fmt_day(last)} (all day)"
 
 
+def _event_text(event) -> str:
+    return " ".join(str(event.get(k, "")) for k in ("SUMMARY", "LOCATION", "DESCRIPTION"))
+
+
 def _refuse_if_invited(event, action: str) -> None:
     # Changing or deleting an event with attendees makes Nextcloud email them.
     if "ATTENDEE" in event:
@@ -432,11 +466,16 @@ def _refuse_if_invited(event, action: str) -> None:
 
 
 @tool(calendar_server, add_server, service="Nextcloud")
-async def events(start: str = "today", days: int = 7, calendar: str = "", details: bool = False) -> str:
-    """List calendar events from start (a date or 'today') for a number of days, with ids. details adds notes."""
+async def events(
+    start: str = "today", days: int = 7, calendar: str = "", query: str = "", details: bool = False, full: bool = False
+) -> str:
+    """List calendar events from start (a date or 'today') for a number of days, with ids. query: only events whose
+    title, place or notes contain all these words (days may then be up to 366). details adds notes, cut to 300
+    characters; full gives them whole, line breaks kept (read them before replacing notes with event_edit)."""
     first = parse_when(start, "start")
     first = first.date() if isinstance(first, datetime) else first
-    days = max(1, min(days, 62))
+    words = _query_words(query)
+    days = max(1, min(days, 366 if words else 62))
     window = (start_of(first), start_of(first + timedelta(days=days)))
     collections = await dav.of("VEVENT", calendar)
     occurrences = []
@@ -448,11 +487,14 @@ async def events(start: str = "today", days: int = 7, calendar: str = "", detail
                 # The server compares all-day (floating) dates as UTC; recheck locally.
                 if _local_start(end) <= window[0] or _local_start(begin) >= window[1]:
                     continue
+                if words and _score(words, _event_text(event)) < len(words):
+                    continue
                 occurrences.append((begin, end, sid, collection.name, event))
     occurrences.sort(key=lambda o: _local_start(o[0]))
     names = sorted({c.name for c in collections})
     last = first + timedelta(days=days - 1)
-    lines = [f"Events {fmt_day(first)} to {fmt_day(last)} (now {fmt_when(now())}; calendars: {', '.join(names)}):"]
+    matching = f" matching {query.strip()!r}" if words else ""
+    lines = [f"Events{matching} {fmt_day(first)} to {fmt_day(last)} (now {fmt_when(now())}; calendars: {', '.join(names)}):"]
     if not occurrences:
         lines.append("None.")
     current_day = None
@@ -474,8 +516,12 @@ async def events(start: str = "today", days: int = 7, calendar: str = "", detail
         if "RECURRENCE-ID" in event or "RRULE" in event:
             line += " · repeats"
         lines.append(line)
-        if details and event.get("DESCRIPTION"):
-            lines.append(f"  {one_line(str(event['DESCRIPTION']), 300)}")
+        if (details or full) and event.get("DESCRIPTION"):
+            text = str(event["DESCRIPTION"])
+            if full:
+                lines.extend(f"  {part}" for part in text.splitlines())
+            else:
+                lines.append(f"  {one_line(text, 300)}")
     if len(occurrences) > MAX_LISTED:
         lines.append(f"({len(occurrences) - MAX_LISTED} more not shown; ask for fewer days)")
     return "\n".join(lines)
@@ -651,7 +697,7 @@ def _due_sort_key(todo) -> tuple:
     return (_is_done(todo), when is None, when or now(), priority, str(todo.get("SUMMARY", "")).lower())
 
 
-def _task_line(todo, depth: int, details: bool) -> list[str]:
+def _task_line(todo, depth: int, details: bool, full: bool) -> list[str]:
     mark = "[x] " if _is_done(todo) else ""
     line = f"{'  ' * depth}- {mark}{one_line(str(todo.get('SUMMARY', '(no title)')), 120)} [{short_id(str(todo['UID']))}]"
     if "DUE" in todo:
@@ -664,14 +710,19 @@ def _task_line(todo, depth: int, details: bool) -> list[str]:
     if priority:
         line += " · " + ("high" if priority <= 4 else "medium" if priority == 5 else "low")
     lines = [line]
-    if details and todo.get("DESCRIPTION"):
-        lines.append(f"{'  ' * (depth + 1)}{one_line(str(todo['DESCRIPTION']), 300)}")
+    if (details or full) and todo.get("DESCRIPTION"):
+        text, indent = str(todo["DESCRIPTION"]), "  " * (depth + 1)
+        if full:
+            lines.extend(f"{indent}{part}" for part in text.splitlines())
+        else:
+            lines.append(f"{indent}{one_line(text, 300)}")
     return lines
 
 
 @tool(tasks_server, add_server, service="Nextcloud")
-async def tasks(list: str = "", show_completed: bool = False, details: bool = False) -> str:
-    """List tasks (open ones unless show_completed), soonest due first, with ids. list: a task list name."""
+async def tasks(list: str = "", show_completed: bool = False, details: bool = False, full: bool = False) -> str:
+    """List tasks (open ones unless show_completed), soonest due first, with ids. list: a task list name. details adds
+    notes, cut to 300 characters; full gives them whole (read them before replacing notes with task_edit)."""
     found = await scan_tasks(list, show_completed)
     lists = [c.name for c in await dav.of("VTODO", list)]
     lines = [f"Now {fmt_when(now())}. Task lists: {', '.join(lists) or 'none'}."]
@@ -694,7 +745,7 @@ async def tasks(list: str = "", show_completed: bool = False, details: bool = Fa
             nonlocal shown
             for todo in sorted(children.get(parent_uid, []), key=_due_sort_key):
                 if shown < MAX_LISTED:
-                    lines.extend(_task_line(todo, depth, details))
+                    lines.extend(_task_line(todo, depth, details, full))
                 shown += 1
                 walk(str(todo["UID"]), depth + 1)
 
@@ -883,5 +934,128 @@ async def note_delete(id: int) -> str:
     return f"Deleted note {id}. It stays in Nextcloud's Files trash bin."
 
 
+# --- Lookup ------------------------------------------------------------------
+
+lookup_server = new_server("nextcloud-lookup")
+FIND_LIMIT = 15
+
+
+def _snippet(text: str, words: list[str], width: int = 140) -> str:
+    flat = one_line(text, 100000)
+    folded = _fold(flat)
+    at = min((folded.find(w) for w in words if w in folded), default=0)
+    begin = max(0, at - width // 3)
+    piece = flat[begin : begin + width].strip()
+    return ("…" if begin else "") + piece + ("…" if begin + width < len(flat) else "")
+
+
+@tool(lookup_server, service="Nextcloud")
+async def find(query: str, past_days: int = 30) -> str:
+    """Search the user's calendar (past_days back to a year ahead), tasks and notes at once, by words in titles,
+    places, notes and list names, with ids. Use it first when a request names something of the user's ("my shopping
+    list", "the dentist appointment") and you don't know where it is."""
+    words = _query_words(query)
+    if not words:
+        raise ToolError("Give words to search for.")
+    today = now().date()
+    first, last = today - timedelta(days=max(0, min(past_days, 366))), today + timedelta(days=365)
+    calendars, lists = await dav.of("VEVENT"), await dav.of("VTODO")
+
+    # Events: one line per event (a repeating one at its next occurrence).
+    series: dict[tuple[str, str], list] = {}
+    for collection in calendars:
+        for found in await dav.report(collection, calendar_query("VEVENT", start_of(first), start_of(last), expand=True)):
+            for event in found.ical.walk("VEVENT"):
+                score = _score(words, f"{_event_text(event)} {collection.name}")
+                if score:
+                    uid = str(event.get("UID", ""))
+                    sid = dav.remember(uid, found.href)
+                    series.setdefault((uid, collection.name), []).append((score, *_span(event), sid, event))
+    event_hits = []
+    for (_, cal_name), occurrences in series.items():
+        occurrences.sort(key=lambda o: _local_start(o[1]))
+        upcoming = [o for o in occurrences if _local_start(o[2]) > now()]
+        score, begin, end, sid, event = upcoming[0] if upcoming else occurrences[-1]
+        line = f"- {_describe(begin, end)} {one_line(str(event.get('SUMMARY', '(no title)')), 120)} [{sid}]"
+        if event.get("LOCATION"):
+            line += f" @ {one_line(str(event['LOCATION']), 80)}"
+        line += f" · {cal_name}"
+        if len(occurrences) > 1 or "RRULE" in event or "RECURRENCE-ID" in event:
+            line += f" · repeats ({len(occurrences)} in range{', next shown' if upcoming else ', last shown'})"
+        event_hits.append((score, not upcoming, _local_start(begin), line))
+
+    task_hits = []
+    for collection, todo in await scan_tasks(show_completed=True):
+        text = f"{todo.get('SUMMARY', '')} {todo.get('DESCRIPTION', '')} {collection.name}"
+        score = _score(words, text)
+        if score:
+            line = _task_line(todo, 0, False, False)[0] + f" · {collection.name}"
+            if todo.get("DESCRIPTION") and _score(words, str(todo["DESCRIPTION"])):
+                line += f"\n    {_snippet(str(todo['DESCRIPTION']), words)}"
+            task_hits.append((score, _is_done(todo), _due_sort_key(todo), line))
+
+    note_hits = []
+    all_notes = (await notes_call("GET")).json()
+    for note in all_notes:
+        title, content, category = note.get("title", ""), note.get("content", ""), note.get("category", "")
+        score = _score(words, f"{title} {content} {category}")
+        if score:
+            where = f" · {category}" if category else ""
+            line = f"- [{note['id']}] {one_line(title, 100)}{where} · {_modified(note)}"
+            if _score(words, content):
+                line += f"\n    {_snippet(content, words)}"
+            note_hits.append((score, -int(note.get("modified", 0)), line))
+
+    best = max([h[0] for h in event_hits + task_hits + note_hits], default=0)
+    need = len(words) if best == len(words) else 1
+    categories = sorted({n.get("category", "") for n in all_notes if n.get("category")})
+    lines = [
+        f"Search {query.strip()!r}: events {fmt_day(first)} to {fmt_day(last)}, all tasks, all notes (now {fmt_when(now())}).",
+        f"Calendars: {', '.join(c.name for c in calendars) or 'none'}. Task lists: {', '.join(c.name for c in lists) or 'none'}."
+        f" Note categories: {', '.join(categories) or 'none'}.",
+    ]
+    if 0 < best < len(words):
+        lines.append("Nothing contains all the words; these contain some of them.")
+    if best < len(words):
+        # Results, not descriptions, are what a model acts on.
+        lines.append(
+            "If this isn't it, search again with other words: synonyms, a shorter form, or the language the"
+            " entry is likely written in (the names above show the languages in use)."
+        )
+    for label, hits, key in (
+        ("Events", event_hits, lambda h: (-h[0], h[1], h[2] if not h[1] else -h[2].timestamp())),
+        ("Tasks", task_hits, lambda h: (-h[0], h[1], h[2])),
+        ("Notes", note_hits, lambda h: (-h[0], h[1])),
+    ):
+        kept = sorted((h for h in hits if h[0] >= need), key=key)
+        lines.append(f"{label} ({len(kept)}):" if kept else f"{label}: none.")
+        lines.extend(h[-1] for h in kept[:FIND_LIMIT])
+        if len(kept) > FIND_LIMIT:
+            lines.append(f"({len(kept) - FIND_LIMIT} more; use more words)")
+    return "\n".join(lines)
+
+
+def _set_choices(tool_name: str, param: str, values: list[str], *servers) -> None:
+    for server in servers:
+        registered = server._tool_manager.get_tool(tool_name)
+        if registered is not None and param in registered.parameters.get("properties", {}):
+            registered.parameters["properties"][param]["enum"] = values
+
+
+async def refresh_choices() -> None:
+    """Make the calendar/list parameters accept exactly the user's names ("" = the default)."""
+    calendars, lists = await dav.of("VEVENT"), await dav.of("VTODO")
+    _set_choices("events", "calendar", [""] + [c.name for c in calendars], calendar_server, add_server)
+    _set_choices("event_add", "calendar", [""] + [c.name for c in calendars if c.writable], calendar_server, add_server)
+    _set_choices("tasks", "list", [""] + [c.name for c in lists], tasks_server, add_server)
+    _set_choices("task_add", "list", [""] + [c.name for c in lists if c.writable], tasks_server, add_server)
+    log.info("choices: %d calendars, %d task lists", len(calendars), len(lists))
+
+
 if __name__ == "__main__":
-    serve({"calendar": calendar_server, "tasks": tasks_server, "notes": notes_server, "calendar-add": add_server})
+    serve(
+        {"calendar": calendar_server, "tasks": tasks_server, "notes": notes_server, "calendar-add": add_server,
+         "lookup": lookup_server},
+        name="nextcloud",
+        on_start=refresh_choices,
+    )

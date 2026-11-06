@@ -188,7 +188,7 @@ Model specs, one per task, each attaching only the servers it needs:
 | Spec | Model | MCP servers | Tool-schema cost |
 |---|---|---|---|
 | `qwen-chat` (soft default) | Qwen3.5-9B | `wikipedia-large`, `searxng-large`, `calc`, `sandbox` | ~2.8k tokens, ~3 s of GPU prefill |
-| `qwen-organiser` (*Qwen Organiser*) | Qwen3.5-9B | `calendar`, `tasks`, `notes`, `freshrss`, `calc` | ~1.9k tokens, ~2 s of GPU prefill |
+| `qwen-organiser` (*Qwen Organiser*) | Qwen3.5-9B | `lookup`, `calendar`, `tasks`, `notes`, `freshrss`, `calc` (+ `mail` once enabled); temperature 0.6, presence_penalty 0 | ~2.2k tokens, ~2 s of GPU prefill |
 | `pi-chat` | gemma4-e2b | none (add from the input bar) | — |
 | `pi-calendar` (*Calendar*) | gemma4-e2b | `calendar`, `tasks`, `freshrss` | ~1.2k tokens |
 

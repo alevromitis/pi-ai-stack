@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# One image, two MCP servers for LibreChat agents that reach the user's own
+# One image, three MCP servers for LibreChat agents that reach the user's own
 # data, over Streamable HTTP (see docker-compose.agent-connectors.yml):
 #
 #   mcp-freshrss    python freshrss.py   FreshRSS (Google Reader API)
-#   mcp-nextcloud   python nextcloud.py  Nextcloud Calendar, Tasks, Notes
+#   mcp-nextcloud   python nextcloud.py  Nextcloud Calendar, Tasks, Notes, find
+#   mcp-mail        python mail.py       a mailbox over IMAP: read, save drafts
 #
 # Built on rpi (arm64). Versions are pinned in requirements.txt.
 FROM python:3.13-slim-trixie
