@@ -9,7 +9,7 @@ Wikipedia, is (`http://rpi.<tailnet>.ts.net:8090`), so the links in
 
 | Container | Server | Network | Can touch |
 |---|---|---|---|
-| `mcp-shell-1` (disabled 2026-10-13, Compose profile `disabled`) | [`mcp-shell-server`](https://github.com/tumf/mcp-shell-server) 1.1.12 via `supergateway` | internal only | `/workspace`; commands in `SHELL_ALLOW_COMMANDS` |
+| `mcp-shell-1` (disabled 2026-10-13, Compose profile `disabled`) | [`mcp-shell-server`](https://github.com/tumf/mcp-shell-server) 1.1.14 via `supergateway` | internal only | `/workspace`; commands in `SHELL_ALLOW_COMMANDS` |
 | `mcp-filesystem-1` (disabled 2026-10-13) | `@modelcontextprotocol/server-filesystem` via `supergateway` | internal only | `/workspace` |
 | `mcp-searxng-1` | [`mcp-searxng`](https://github.com/ihor-sokoliuk/mcp-searxng) 2.10.0 (upstream image) | internal + `agent-tools-egress` + `searxng-external` | `searxng-1:8080`; the internet (`web_url_read`) |
 | `mcp-searxng-large-1` | the same image, sized for Qwen (full schemas, larger budgets) | the same | the same |

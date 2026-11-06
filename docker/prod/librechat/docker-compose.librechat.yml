@@ -166,9 +166,9 @@ services:
       - /tmp
 
   meilisearch:
-    # digest for v1.35.1:
-    #   sha256:8b57fc3c7f46535ddef3828df1538465ac19d892eb57c9a10da6df0880bd5856
-    image: getmeili/meilisearch:${MEILI_TAG:-v1.35.1}
+    # digest for v1.56.1:
+    #   sha256:b7ba431bf6f9b26cc86132798f3640964147a699cf23f026b74c6c05dbb1d60d
+    image: getmeili/meilisearch:${MEILI_TAG:-v1.56.1}
     container_name: librechat-meilisearch-1
     restart: unless-stopped
     user: "1000:1000"
@@ -177,6 +177,9 @@ services:
     environment:
       MEILI_ENV: production
       MEILI_NO_ANALYTICS: "true"
+      # A bumped MEILI_TAG converts the index in place on first start (no
+      # dump); a no-op otherwise. There is no way back: copy data-meili first.
+      MEILI_UPGRADE_DB: "true"
     env_file:
       # Reads MEILI_MASTER_KEY from .env.librechat (LibreChat needs it too).
       - .env
@@ -209,9 +212,9 @@ services:
       - /tmp
 
   vectordb:
-    # digest for 0.8.0-pg15-trixie:
-    #   sha256:8809cfffff0082cf260c9ac752f1dd1afc77f6f0a55c4e6411321e78efc3d9a5
-    image: pgvector/pgvector:${PGVECTOR_TAG:-0.8.0-pg15-trixie}
+    # digest for 0.8.7-pg15-trixie:
+    #   sha256:4870105f2d566f6abe6b838cfbf86823fcca78967b0bc1cf79a7d84a0b4ebb60
+    image: pgvector/pgvector:${PGVECTOR_TAG:-0.8.7-pg15-trixie}
     container_name: librechat-vectordb-1
     restart: unless-stopped
     # Data dir must be chown 1000:1000 before first start, like Mongo's.

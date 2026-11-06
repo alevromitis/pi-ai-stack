@@ -10,9 +10,9 @@
 # Built on rpi (arm64). Versions are pinned here; bump deliberately.
 FROM node:22-bookworm-slim
 
-ARG SUPERGATEWAY_VERSION=4.1.0
+ARG SUPERGATEWAY_VERSION=4.2.1
 ARG MCP_FILESYSTEM_VERSION=2026.8.31
-ARG MCP_SHELL_VERSION=1.1.12
+ARG MCP_SHELL_VERSION=1.1.14
 
 # Tools the shell server may run (see ALLOW_COMMANDS in the compose file).
 # coreutils, grep, sed, findutils, tar, gzip, diffutils ship with the base.
