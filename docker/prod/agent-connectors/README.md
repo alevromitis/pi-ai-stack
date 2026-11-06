@@ -51,9 +51,12 @@ empty as in the image. Nothing in this stack changes for it.
 
 * **Dates** are `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, `today`, `tomorrow`,
   `yesterday`, a weekday or `next <weekday>` (the next one, never today),
-  `this <weekday>` (today counts), `next week` (its Monday), `+3d`, `+2w`
-  or `in 3 days`, optionally followed by a time (`HH:MM`, `9am`, `5pm`,
-  `at 10:00`), in `TZ`. The model copies the user's words instead of doing
+  `this <weekday>` (today counts), `next week` (its Monday), `+3d`, `+2w`,
+  `in 3 days`, or a day and month name (`12 November`, `Thursday Nov 12`,
+  «12 Νοεμβρίου»; without a year, the next such date), optionally followed
+  by a time (`HH:MM`, `9am`, `5pm`, `at 10:00`), in `TZ`. Greek day words
+  («Δευτέρα», «αύριο», «επόμενη Τρίτη») work too: the model passes the
+  user's words. The model copies the user's words instead of doing
   date arithmetic. A date-only start makes an all-day event; an all-day end
   date is inclusive.
 * **One search: `find`** (`/lookup/mcp`, since 2026-11-06). Words are

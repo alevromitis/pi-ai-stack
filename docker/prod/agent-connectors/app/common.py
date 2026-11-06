@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
@@ -134,18 +135,60 @@ def tool(*servers: MCPServer, kind: str = "read", service: str = "upstream") -> 
 # --- Dates (local time, TZ) --------------------------------------------------
 
 _WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+# The user's own words, passed through by the model: Greek day words (accents
+# dropped) and month names in English or Greek, matched by their start.
+_GREEK_DAYS = {"δευτερα": "monday", "τριτη": "tuesday", "τεταρτη": "wednesday", "πεμπτη": "thursday",
+               "παρασκευη": "friday", "σαββατο": "saturday", "κυριακη": "sunday",
+               "σημερα": "today", "αυριο": "tomorrow", "χθες": "yesterday", "επομενη": "next", "αυτη": "this"}
+_MONTHS = [("jan", 1), ("feb", 2), ("mar", 3), ("apr", 4), ("may", 5), ("jun", 6), ("jul", 7), ("aug", 8),
+           ("sep", 9), ("oct", 10), ("nov", 11), ("dec", 12), ("ιαν", 1), ("φεβ", 2), ("μαρ", 3), ("απρ", 4),
+           ("μαι", 5), ("μαη", 5), ("ιουν", 6), ("ιουλ", 7), ("αυγ", 8), ("σεπ", 9), ("οκτ", 10), ("νοε", 11),
+           ("δεκ", 12)]
 _TIME = re.compile(r"^(\d{1,2}):(\d{2})$")
 # "9am", "5:30pm", "17h": a clock the model may copy from the user's words.
 _CLOCK_WORD = re.compile(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm|h)$")
 _OFFSET = re.compile(r"^(?:\+\s*(\d+)\s*([dw])|in\s+(\d+)\s+(day|days|week|weeks))$")
 DATE_HELP = (
     "Use YYYY-MM-DD, YYYY-MM-DDTHH:MM, 'today', 'tomorrow', 'yesterday', a weekday ('friday', 'next friday',"
-    " 'this friday'), 'next week', '+3d', '+2w' or 'in 3 days', optionally followed by a time (HH:MM, 9am, 5pm)."
+    " 'this friday'), '12 november', 'next week', '+3d', '+2w' or 'in 3 days', optionally followed by a time"
+    " (HH:MM, 9am, 5pm)."
 )
 
 
 def now() -> datetime:
     return datetime.now(TZ)
+
+
+def _plain(text: str) -> str:
+    """Lower case, accents dropped, Greek day words in English."""
+    folded = "".join(c for c in unicodedata.normalize("NFD", text.lower()) if not unicodedata.combining(c))
+    return " ".join(_GREEK_DAYS.get(w, w) for w in folded.replace(",", " ").split())
+
+
+def _month(word: str) -> int | None:
+    for prefix, number in sorted(_MONTHS, key=lambda m: -len(m[0])):
+        if word.startswith(prefix):
+            return number
+    return None
+
+
+def _named_date(words: str, today: date) -> date | None:
+    """'12 november', 'november 12', 'thursday 12 nov 2026': a day and a month
+    name, an optional weekday (ignored) and year; without a year, the next
+    such date from today."""
+    parts = [w.rstrip(".") for w in words.split() if w.rstrip(".") not in _WEEKDAYS]
+    days = [w for w in parts if w.isdigit() and 1 <= int(w) <= 31 and len(w) <= 2]
+    years = [w for w in parts if w.isdigit() and len(w) == 4]
+    months = [m for m in (_month(w) for w in parts if not w.isdigit()) if m]
+    if len(days) != 1 or len(months) != 1 or len(parts) != 2 + len(years) or len(years) > 1:
+        return None
+    try:
+        found = date(int(years[0]) if years else today.year, months[0], int(days[0]))
+        if not years and found < today:
+            found = found.replace(year=today.year + 1)
+    except ValueError:
+        return None
+    return found
 
 
 def _relative_day(words: str, today: date) -> date | None:
@@ -173,7 +216,7 @@ def _relative_day(words: str, today: date) -> date | None:
         count = int(match[1] or match[3])
         unit = (match[2] or match[4])[0]
         return today + timedelta(days=count * (7 if unit == "w" else 1))
-    return None
+    return _named_date(words, today)
 
 
 def _clock(text: str) -> tuple[int, int] | None:
@@ -195,7 +238,7 @@ def _clock(text: str) -> tuple[int, int] | None:
 def parse_when(value: str, field: str) -> date | datetime:
     """A date (all-day) or an aware datetime in TZ, from what a model writes."""
     text = " ".join(value.strip().split())
-    lower = text.lower()
+    lower = _plain(text)
     today = now().date()
     # A relative day, then optionally a clock: "next tuesday 10:00", "+2w 9am".
     words, clock = lower, ""
