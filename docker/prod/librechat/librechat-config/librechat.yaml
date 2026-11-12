@@ -132,7 +132,7 @@ mcpServers:
     type: streamable-http
     url: 'http://instagram-personal-1:3000/mcp'
     title: 'Instagram Personal'
-    description: 'Your personal Instagram inbox and media; sending requires approval.'
+    description: 'Your personal Instagram inbox and media; replies are sent without approval prompts.'
     headers:
       Authorization: 'Bearer ${INSTAGRAM_PERSONAL_API_KEY}'
     # Individual private API requests are paced; a bounded read may paginate.

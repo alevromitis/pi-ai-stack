@@ -21,19 +21,16 @@ See [Instagram Personal setup](../../dev/instagram-personal/README.md) for
 account login and limits. Tool discovery works before Instagram login;
 inbox/media access requires the user to provision their own session locally.
 
-**E2B Group Mentions** selects the saved private agent
-`agent_instagram_group_mentions`. The personal bridge invokes it through the
-LibreChat Agents API only for unprocessed `@kathisterimeno_bot` mentions (including fetched history) in configured Instagram
-groups, then delivers one deduplicated reply to the source group. Ordinary
-messages do not invoke the model. The agent uses only calculator, text-counting
-and compact web-search tools, isolated agent memory, thinking off, a 4096-token
-context and 512-token output limit. Instagram system instructions carry
-`[instagram-personal:native]`, bypassing Argos for these requests and replies;
-other chats retain translation. Already-fetched queued mentions drain serially
-without send or per-request cooldown in this deployment, within the 32-send
-rolling daily budget. The manual Instagram preset also bypasses Argos and uses
-a smaller context/output allowance with thinking disabled.
-See the bridge README for group allowlists, polling latency and startup steps.
+**E2B Group Mentions** opens the template agent
+`agent_instagram_group_mentions` for manual chats. The bridge itself calls a
+separate saved agent per Instagram group through the Agents API, only for
+mentions of the bot in configured groups, and delivers one deduplicated reply.
+Instagram system prompts carry `[instagram-personal:native]`, which bypasses
+Argos translation for those requests; other chats keep translation.
+`NODE_OPTIONS` preloads `loader.cjs` from the bridge folder to add the group
+checks and per-group memory; after a LibreChat upgrade, check the log for
+`Instagram routing: unsupported LibreChat build`. Agent settings, limits,
+routing and failure behaviour are documented in the bridge README.
 
 ```
 .
