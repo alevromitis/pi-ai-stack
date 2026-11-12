@@ -88,8 +88,10 @@ services:
       # and instance_info, empty = none.
       # 1 = chats in other languages reach the model in English and the
       # reply goes back translated (patches/translation.py, via mcp-translate
-      # in agent-tools), 0 = messages and replies pass untouched.
-      LITERT_TRANSLATE: "${LITERT_TRANSLATE:-1}"
+      # in agent-tools), 0 = messages and replies pass untouched. Off since
+      # 2026-11-12: the round trip garbled Greek dates and characters; the
+      # models work natively and mcp-translate stays as a tool.
+      LITERT_TRANSLATE: "${LITERT_TRANSLATE:-0}"
       LITERT_TRANSLATE_URL: "${LITERT_TRANSLATE_URL:-http://mcp-translate-1:8000/api/translate}"
       LITERT_TRANSLATE_MIN_CONF: "${LITERT_TRANSLATE_MIN_CONF:-0.8}"
       LITERT_HIDE_TOOLS: "${LITERT_HIDE_TOOLS-searxng_search_suggestions_mcp_searxng,searxng_instance_info_mcp_searxng}"
