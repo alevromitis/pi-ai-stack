@@ -17,7 +17,7 @@ the separate personal Instagram bridge over `agent-tools-internal`.
 Its shared key is `INSTAGRAM_PERSONAL_API_KEY` in `.env.librechat`, matching
 the bridge's `BRIDGE_API_KEY`. Both reply tools run without approval prompts. Plain E2B
 chat can also select Instagram Personal from the tool picker.
-See [Instagram Personal setup](../../dev/instagram-personal/README.md) for
+See [Instagram Personal setup](../instagram-personal/README.md) for
 account login and limits. Tool discovery works before Instagram login;
 inbox/media access requires the user to provision their own session locally.
 

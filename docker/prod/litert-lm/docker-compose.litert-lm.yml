@@ -136,7 +136,7 @@ services:
     environment:
       UPSTREAM_HOST: litert-chat-upstream
     volumes:
-      - ../../dev/instagram-personal/librechat-routing/litert_chat_gateway.py:/gateway/litert_chat_gateway.py:ro
+      - ./gateway/litert_chat_gateway.py:/gateway/litert_chat_gateway.py:ro
     ports:
       - "${APP_PORT:-9379}:9379"
     networks:

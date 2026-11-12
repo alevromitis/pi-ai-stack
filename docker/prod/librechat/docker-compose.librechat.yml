@@ -116,8 +116,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
       # Admin config (custom endpoints, interface), read-only.
       - ./librechat-config/librechat.yaml:/app/librechat.yaml:ro
-      - ../../dev/instagram-personal/librechat-routing:/app/instagram-routing:ro
-      - ../../dev/instagram-personal/deployment-skills:/app/instagram-deployment-skills:ro
+      - ../instagram-personal/librechat-routing:/app/instagram-routing:ro
+      - ../instagram-personal/deployment-skills:/app/instagram-deployment-skills:ro
       - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/uploads:/app/uploads
       - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/images:/app/client/public/images
       - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/logs:/app/logs
