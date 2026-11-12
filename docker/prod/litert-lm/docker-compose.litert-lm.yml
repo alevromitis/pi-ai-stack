@@ -109,6 +109,9 @@ services:
       # Per-request Instagram bypass; Python path matches the pinned image.
       - ./patches/translation.py:/opt/venv/lib/python3.13/site-packages/litert_lm_cli/commands/serve/translation.py:ro
       - ./patches/prefix_cache.py:/opt/venv/lib/python3.13/site-packages/litert_lm_cli/commands/serve/prefix_cache.py:ro
+      # academic_calendar results count as a search (Sources line); mounted
+      # like the two above, so no image rebuild.
+      - ./patches/citations.py:/opt/venv/lib/python3.13/site-packages/litert_lm_cli/commands/serve/citations.py:ro
     networks:
       chat-backend:
         aliases:
