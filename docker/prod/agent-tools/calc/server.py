@@ -5,7 +5,13 @@ these return the exact answer instead (calc.py). Four tools with one-line
 descriptions and hand-written schemas, to keep the prompt small. Pure
 Python, no files, no network.
 
-Endpoint: /mcp (Streamable HTTP, stateless, JSON responses); /healthz.
+A second server shares the process: academic_calendar, NTUA's official
+academic calendar (academic.py, data in ntua_calendar.json, baked into the
+image). Its own endpoint, so LibreChat lists it as its own server and a
+spec takes it without the calculator.
+
+Endpoints: /mcp (calculator), /academic/mcp (calendar); Streamable HTTP,
+stateless, JSON responses; /healthz.
 """
 
 import contextlib
@@ -23,6 +29,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 from starlette.routing import Mount, Route
 
+import academic
 import calc
 
 
@@ -97,6 +104,34 @@ for fn, description, schema in TOOLS:
     mcp.add_tool(fn, description=description, structured_output=False, annotations=ANNOTATIONS)
     mcp._tool_manager.get_tool(fn.__name__).parameters = {"type": "object", **schema}
 
+calendar = MCPServer("academic", log_level="WARNING")
+
+
+def academic_calendar(query: str = "", start: str = "", end: str = "") -> str:
+    try:
+        return academic.search(query[:200], start[:100], end[:100], _today())
+    except academic.CalendarError as exc:
+        raise ToolError(f"academic_calendar: {exc}") from exc
+    finally:
+        log.info("academic_calendar")
+
+
+calendar.add_tool(
+    academic_calendar,
+    description="NTUA's official academic calendar (every school, <feed> too): semesters, exam periods, "
+                "registration and thesis deadlines, days with no classes. No arguments: what is on now and next.",
+    structured_output=False,
+    annotations=ANNOTATIONS,
+)
+calendar._tool_manager.get_tool("academic_calendar").parameters = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string", "description": "what to find, e.g. winter exams, Easter break, thesis deadline; add postgraduate for master's"},
+        "start": {**DATE, "description": "YYYY-MM-DD or today; alone, that one day"},
+        "end": DATE,
+    },
+}
+
 
 def main() -> None:
     logging.basicConfig(level=logging.WARNING)
@@ -108,19 +143,22 @@ def main() -> None:
         allowed_hosts=[h.strip() for h in env("MCP_ALLOWED_HOSTS").split(",") if h.strip()],
         allowed_origins=[],
     )
-    app = mcp.streamable_http_app(stateless_http=True, json_response=True, transport_security=security, host="0.0.0.0")
+    apps = {
+        name: server.streamable_http_app(stateless_http=True, json_response=True, transport_security=security, host="0.0.0.0")
+        for name, server in (("calc", mcp), ("academic", calendar))
+    }
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette):
-        # A mounted app's own lifespan doesn't run; start its session manager here.
-        async with mcp.session_manager.run():
+        # A mounted app's own lifespan doesn't run; start the session managers here.
+        async with mcp.session_manager.run(), calendar.session_manager.run():
             yield
 
     async def healthz(_request: Request) -> PlainTextResponse:
         return PlainTextResponse("ok")
 
     uvicorn.run(
-        Starlette(routes=[Route("/healthz", healthz), Mount("/", app=app)], lifespan=lifespan),
+        Starlette(routes=[Route("/healthz", healthz), Mount("/academic", app=apps["academic"]), Mount("/", app=apps["calc"])], lifespan=lifespan),
         host="0.0.0.0",
         port=int(env("MCP_PORT", "8000")),
         log_level="warning",

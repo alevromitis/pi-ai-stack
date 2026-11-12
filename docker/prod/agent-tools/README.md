@@ -15,7 +15,7 @@ Wikipedia, is (`http://rpi.<tailnet>.ts.net:8090`), so the links in
 | `mcp-searxng-large-1` | the same image, sized for Qwen (full schemas, larger budgets) | the same | the same |
 | `mcp-playwright-1` | [Playwright MCP](https://github.com/microsoft/playwright-mcp) 0.0.83, headless Chromium | internal + `agent-tools-egress` | the internet (and, via Docker NAT, the LAN); writes to `/workspace/playwright` |
 | `mcp-wikipedia-1` | `wikipedia/server.py` (this repo; libzim 3.13, mcp 2.3) | internal only | `${WIKIPEDIA_ZIM_DIR}`, read-only |
-| `mcp-calc-1` | `calc/server.py` (this repo; mcp 2.3) | internal only | nothing |
+| `mcp-calc-1` | `calc/server.py` (this repo; mcp 2.3): the calculator on `/mcp`, NTUA's academic calendar on `/academic/mcp` | internal only | nothing |
 | `mcp-translate-1` | `translate/server.py` (this repo; CTranslate2 + Argos models) | internal only | `${TRANSLATE_MODELS_DIR}` (`/mnt/external/argos-models`), read-only |
 | `kiwix-serve-1` | [`kiwix-serve`](https://github.com/kiwix/kiwix-tools) 3.8.2 (upstream image) | `agent-tools-web`, published `8090` | `${WIKIPEDIA_ZIM_DIR}`, read-only |
 
@@ -232,6 +232,42 @@ Each answer restates its input ("17*23 = 391"). In a local test with the
 model ("How many r letters are in strawberry?", "What date is 90 days after
 2026-10-10?") it picked the right tool and answered correctly. Before the
 per-letter tally, a call without `find` still ended in "2".
+
+## Academic calendar (`mcp-calc`, `/academic/mcp`)
+
+NTUA's official academic calendar, as one read-only tool for
+`gemma4-e2b` (LibreChat server `ntua-calendar`, on the `pi-calendar` spec,
+and on `pi-chat` from the input bar). It shares `mcp-calc-1`'s process on
+its own path rather than taking a container of its own: no network, no
+files beyond the image, ~0.17k tokens of schema.
+
+* **Source.** The two NTUA Senate decisions for 2026-2027, which <feed>
+  (SAMPS) links on
+  [its calendar page](https://<feed>.ntua.gr/el/education/academic-calendar):
+  undergraduate (8th session, 19.6.2026) and postgraduate (9th session,
+  21.7.2026). They hold for every school; <feed> adds no dates of its own.
+  Both are scanned PDFs, so `calc/ntua_calendar.json` was transcribed by
+  hand, with each entry's Greek wording (`el`) kept for checking; every
+  date's weekday matches the one the decision prints. The movable
+  holidays (Clean Monday, the Easter break, Holy Spirit Monday) are named
+  but not dated there: dated from Orthodox Easter 2027, 2 May.
+* **Tool.** `academic_calendar(query, start, end)`. `query` is words
+  ("winter exams", "Easter break", "thesis deadline", Greek stems too),
+  matched through a synonym table to entry tags; the entries with the
+  most matching tags win. A month name narrows to that month. `start`
+  alone is one day, and the reply says whether it is a teaching day, a
+  day off or a weekend. No arguments: what is on now and the next ten
+  entries. Undergraduate by default; "postgraduate" or "master's" switches
+  to the other decision. Entries are marked `(past)`, `(now)`, `(today)`.
+  Dates outside the calendar's span get a refusal, not a guess.
+* **Sources.** The reply is shaped like a Wikipedia result (`[1] Title`,
+  the entries, a `Sources:` line with the decision's PDF), and
+  litert-lm's citations patch treats `academic_calendar` like
+  `wikipedia_search`, so answers end with that link.
+* **Next year.** Replace `ntua_calendar.json` (entries, `covers`, the two
+  `sources`) when the 2027-2028 decisions are out, usually June and July,
+  and rebuild `mcp-calc`. Past `covers`' end, every reply starts with a
+  warning that the loaded calendar is last year's.
 
 ## Translation (`mcp-translate`)
 

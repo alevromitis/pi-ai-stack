@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-COPY calc.py server.py /app/
+COPY calc.py academic.py ntua_calendar.json server.py /app/
 WORKDIR /app
 USER 1000:1000
 CMD ["python", "server.py"]

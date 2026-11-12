@@ -166,6 +166,17 @@ mcpServers:
     title: 'Calculator'
     description: 'Exact arithmetic, dates and letter counts.'
     timeout: 10000
+  # NTUA's official academic calendar (the Senate's undergraduate and
+  # postgraduate decisions, which <feed> links): one academic_calendar tool
+  # (~0.17k tokens of schema), served by mcp-calc-1 on its own path, baked
+  # into the image, no network. Its reply ends in a Sources line with the
+  # decision's PDF, which litert-lm's citations patch keeps.
+  ntua-calendar:
+    type: streamable-http
+    url: 'http://mcp-calc-1:8000/academic/mcp'
+    title: 'NTUA Calendar'
+    description: "NTUA's academic calendar: semesters, exams, deadlines, days off."
+    timeout: 10000
   # The same two sized for Qwen (qwen-chat): Wikipedia's /large/mcp (10
   # passages of <=1200 chars, ~3k tokens, plus wikipedia_read for an
   # article's lead or one section) and a second SearXNG server with full
@@ -571,13 +582,16 @@ modelSpecs:
     # approval (toolApproval), so the prompt has it act rather than ask
     # first. The calendar is picked by the connector's rules
     # (NEXTCLOUD_CALENDAR_RULES), not by the model.
+    # ntua-calendar (read-only, ~0.17k tokens) answers NTUA's own dates
+    # and lets the model file them, e.g. "add the exam period".
     - name: 'pi-calendar'
       label: 'Calendar'
-      description: 'Calendar and tasks with the local model, from chat or your feeds. Every change asks you first.'
+      description: "Calendar and tasks with the local model, from chat, your feeds or NTUA's academic calendar. Every change asks you first."
       mcpServers:
         - 'calendar'
         - 'tasks'
         - 'freshrss'
+        - 'ntua-calendar'
       preset:
         endpoint: 'LiteRT-LM'
         model: 'gemma4-e2b'
@@ -593,6 +607,7 @@ modelSpecs:
           - Leave calendar empty unless the user named one: it is chosen for you from the event.
           - To change or find an event or task, list first (events, tasks) and use the id in square brackets.
           - From the feeds: list items (rss_items), read the ones that may contain a date (rss_read), and add only items with a real date or deadline: an event for something that happens at a time, a task for a deadline. Always pass the item's link.
+          - For NTUA's own dates (semesters, exam periods, registration and thesis deadlines, days with no classes), call academic_calendar and answer from its result, not from memory.
           - Copy dates, times and places exactly as the source gives them; never guess a missing time (use a date-only start for an all-day event).
           - Never claim a change that no tool result shows ("Created", "Added", "Updated").
           - Be brief: say what you added or changed, with its date.

@@ -24,7 +24,8 @@ name: agent-tools
 #   mcp-searxng-large :8080  the same, full tools and larger budgets, for Qwen
 #   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only;
 #                          /mcp for gemma4-e2b, /large/mcp for Qwen
-#   mcp-calc        :8000  arithmetic, dates, letter counts; internal only
+#   mcp-calc        :8000  arithmetic, dates, letter counts (/mcp) and NTUA's
+#                          academic calendar (/academic/mcp); internal only
 #   mcp-translate   :8000  offline translation (Argos models); internal only
 #   kiwix-serve     :8080  the same ZIM as web pages, published ${KIWIX_PORT}
 #

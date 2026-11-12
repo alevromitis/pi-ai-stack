@@ -7,7 +7,8 @@ gemma4-e2b cites unpredictably: it skips or reformats the Sources line,
 drops it under a length limit ("in two sentences"), and does worse with
 SearXNG results, which carry no ready-made line. So when a request's
 messages since the last user turn hold results from the search tools
-(wikipedia_search, searxng_web_search, web_url_read - LibreChat appends
+(wikipedia_search, searxng_web_search, web_url_read, and academic_calendar,
+NTUA's calendar, shaped like a Wikipedia result - LibreChat appends
 "_mcp_<server>" to the names) and the reply calls no tool, the server:
 
 1. collects the sources those results offer: the Sources line of a
@@ -280,7 +281,9 @@ def collect(body: dict[str, Any]) -> Offered | None:
     ran = _tested(name, args, output)
     if ran and ran[0] >= best:
       best, groups.tested = ran[0], ran[1]
-    if "wikipedia_search" in name:
+    # academic_calendar (mcp-calc's /academic/mcp) answers in the same
+    # shape: "[n] Title" per Senate decision, then a Sources line.
+    if "wikipedia_search" in name or "academic_calendar" in name:
       found = _wikipedia(output)
     elif "searxng_web_search" in name:
       found = _searxng(output)

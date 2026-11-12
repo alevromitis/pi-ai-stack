@@ -1,0 +1,95 @@
+{
+  "_comment": "NTUA's official academic calendar 2026-2027, transcribed by hand from the two NTUA Senate decisions that <feed> (SAMPS) links on https://<feed>.ntua.gr/el/education/academic-calendar (scanned PDFs, no text layer). 'el' is the decision's own wording; 'what' is what the tool prints. Movable feasts (Clean Monday, Easter break, Holy Spirit Monday) are named, not dated, in the decisions: dated here from Orthodox Easter 2027 = 2 May. 'p': ug = undergraduate decision, pg = postgraduate decision, all = in both (days with no classes or exams). 'end' is inclusive. Replace the whole file when the next year's decisions are out (agent-tools README, Academic calendar).",
+  "covers": ["2026-09-01", "2027-10-31"],
+  "sources": {
+    "ug": {
+      "title": "NTUA undergraduate academic calendar 2026-2027",
+      "url": "https://<feed>.ntua.gr/api/documents/file/linked-3b282c6b68c7753156c6.pdf",
+      "decided": "NTUA Senate, 8th session of 2026, 19 June 2026, item 5"
+    },
+    "pg": {
+      "title": "NTUA postgraduate academic calendar 2026-2027",
+      "url": "https://<feed>.ntua.gr/api/documents/file/linked-3bf1d0d7e68c44cb40c3.pdf",
+      "decided": "NTUA Senate, 9th session of 2026, 21 July 2026, item 16"
+    }
+  },
+  "entries": [
+    {"p": "ug", "start": "2026-09-28", "what": "Winter semester: classes and course registration begin", "el": "Έναρξη μαθημάτων και εγγραφών", "tags": ["winter", "classes", "registration", "start"]},
+    {"p": "ug", "start": "2026-09-28", "end": "2027-01-15", "what": "Winter semester classes", "el": "Χειμερινό εξάμηνο: έναρξη - λήξη μαθημάτων", "tags": ["winter", "classes", "semester"]},
+    {"p": "ug", "start": "2026-10-09", "what": "Winter semester: course registration deadline", "el": "Λήξη προθεσμίας εγγραφών", "tags": ["winter", "registration", "deadline"]},
+    {"p": "ug", "start": "2026-10-16", "what": "Winter semester: deadline to withdraw from, or swap, a registered course", "el": "Λήξη προθεσμίας παραιτήσεως και αλλαγής προτίμησης από μαθήματα του εξαμήνου που δηλώθηκαν", "tags": ["winter", "withdraw", "registration", "deadline"]},
+    {"p": "ug", "start": "2026-10-23", "what": "Winter semester: deadline to withdraw from the whole semester", "el": "Λήξη προθεσμίας παραιτήσεως από την όλη σπουδή του εξαμήνου", "tags": ["winter", "withdraw", "deadline"]},
+    {"p": "ug", "start": "2026-10-29", "what": "Winter semester: school secretariats issue the lists of registered students", "el": "Έκδοση καταλόγων από τις Γραμματείες των Σχολών των εγγραφέντων φοιτητών", "tags": ["winter", "registration", "lists"]},
+    {"p": "ug", "start": "2027-01-15", "what": "Winter semester: last day of classes", "el": "Λήξη μαθημάτων", "tags": ["winter", "classes", "end"]},
+    {"p": "ug", "start": "2027-01-18", "end": "2027-02-12", "what": "Winter semester exam period (and other teaching needs)", "el": "Περίοδος ειδικών εκπαιδευτικών αναγκών και εξετάσεων", "tags": ["winter", "exam"]},
+    {"p": "ug", "start": "2027-02-19", "what": "Winter semester: grades submitted", "el": "Κατάθεση βαθμολογίας", "tags": ["winter", "grades"]},
+
+    {"p": "ug", "start": "2027-02-15", "what": "Spring semester: classes and course registration begin", "el": "Έναρξη μαθημάτων και εγγραφών", "tags": ["spring", "classes", "registration", "start"]},
+    {"p": "ug", "start": "2027-02-15", "end": "2027-05-28", "what": "Spring semester classes", "el": "Εαρινό εξάμηνο: έναρξη - λήξη μαθημάτων", "tags": ["spring", "classes", "semester"]},
+    {"p": "ug", "start": "2027-02-26", "what": "Spring semester: course registration deadline", "el": "Λήξη προθεσμίας εγγραφών", "tags": ["spring", "registration", "deadline"]},
+    {"p": "ug", "start": "2027-03-05", "what": "Spring semester: deadline to withdraw from, or swap, a registered course", "el": "Λήξη προθεσμίας παραιτήσεως και αλλαγής προτίμησης από μαθήματα του εξαμήνου που δηλώθηκαν", "tags": ["spring", "withdraw", "registration", "deadline"]},
+    {"p": "ug", "start": "2027-03-16", "what": "Spring semester: deadline to withdraw from the whole semester", "el": "Λήξη προθεσμίας παραιτήσεως από την όλη σπουδή του εξαμήνου", "tags": ["spring", "withdraw", "deadline"]},
+    {"p": "ug", "start": "2027-03-23", "what": "Spring semester: school secretariats issue the lists of registered students", "el": "Έκδοση καταλόγων από τις Γραμματείες των Σχολών, των εγγραφέντων φοιτητών", "tags": ["spring", "registration", "lists"]},
+    {"p": "ug", "start": "2027-05-28", "what": "Spring semester: last day of classes", "el": "Λήξη μαθημάτων", "tags": ["spring", "classes", "end"]},
+    {"p": "ug", "start": "2027-05-31", "end": "2027-06-25", "what": "Spring semester exam period (and other teaching needs)", "el": "Έναρξη περιόδου ειδικών εκπαιδευτικών αναγκών και εξετάσεων - Λήξη Εξεταστικής περιόδου", "tags": ["spring", "exam"]},
+    {"p": "ug", "start": "2027-07-02", "what": "Spring semester: grades submitted", "el": "Κατάθεση βαθμολογίας", "tags": ["spring", "grades"]},
+    {"p": "ug", "start": "2027-06-28", "what": "Major exercises (field courses) begin, for the Schools of Rural, Surveying and Geoinformatics Engineering and of Mining and Metallurgical Engineering only", "el": "Μαθήματα μεγάλων Ασκήσεων των φοιτητών της Σχολής Αγρονόμων και Τοπογράφων Μηχανικών-Μηχανικών Γεωπληροφορικής· Μεγάλες Ασκήσεις Τομέων της Σχολής Μεταλλειολόγων-Μεταλλουργών Μηχανικών", "tags": ["exercises", "field"]},
+
+    {"p": "ug", "start": "2027-08-23", "end": "2027-09-24", "what": "September resit exams for winter and spring semester courses", "el": "Περίοδος ειδικών εκπαιδευτικών αναγκών και επαναληπτικών εξετάσεων μαθημάτων χειμερινού και εαρινού εξαμήνου", "tags": ["resit", "exam", "september"]},
+    {"p": "ug", "start": "2027-10-01", "what": "September resit exams: grades submitted", "el": "Κατάθεση βαθμολογίας των παραπάνω εξετάσεων", "tags": ["resit", "grades"]},
+
+    {"p": "ug", "start": "2026-11-09", "end": "2026-11-18", "what": "Diploma thesis: applications to choose or change a topic (winter semester)", "el": "Έναρξη - λήξη προθεσμίας υποβολής αιτήσεων για επιλογή ή αλλαγή θέματος διπλωματικής εργασίας", "tags": ["thesis", "winter", "deadline", "assignment"]},
+    {"p": "ug", "start": "2026-11-23", "what": "Diploma thesis: schools assign theses (winter semester)", "el": "Κατανομή διπλωματικών εργασιών από τις Σχολές", "tags": ["thesis", "winter", "assignment"]},
+    {"p": "ug", "start": "2027-02-15", "end": "2027-02-26", "what": "Diploma thesis: applications to choose or change a topic (spring semester)", "el": "Έναρξη - λήξη προθεσμίας υποβολής αιτήσεων για επιλογή ή αλλαγή θέματος διπλωματικής εργασίας", "tags": ["thesis", "spring", "deadline", "assignment"]},
+    {"p": "ug", "start": "2027-03-05", "what": "Diploma thesis: schools assign theses (spring semester)", "el": "Κατανομή διπλωματικών εργασιών από τις Σχολές", "tags": ["thesis", "spring", "assignment"]},
+
+    {"p": "ug", "start": "2026-09-11", "what": "Diploma thesis, October 2026 round: deadline to hand in the thesis", "el": "Λήξη προθεσμίας παραδόσεως διπλωματικών εργασιών", "tags": ["thesis", "defence", "deadline", "october"]},
+    {"p": "ug", "start": "2026-09-18", "what": "Diploma thesis, October 2026 round: deadline for theses to be accepted", "el": "Λήξη προθεσμίας για αποδοχή διπλωματικών εργασιών", "tags": ["thesis", "defence", "deadline", "october"]},
+    {"p": "ug", "start": "2026-09-28", "end": "2026-10-09", "what": "Diploma thesis, October 2026 round: oral examinations", "el": "Προφορικές εξετάσεις διπλωματικών εργασιών", "tags": ["thesis", "defence", "exam", "october"]},
+    {"p": "ug", "start": "2026-10-16", "what": "Diploma thesis, October 2026 round: grades submitted", "el": "Κατάθεση βαθμολογίας διπλωματικών εργασιών", "tags": ["thesis", "defence", "grades", "october"]},
+    {"p": "ug", "start": "2027-01-29", "what": "Diploma thesis, February 2027 round: deadline to hand in the thesis", "el": "Λήξη προθεσμίας παραδόσεως διπλωματικών εργασιών", "tags": ["thesis", "defence", "deadline", "february"]},
+    {"p": "ug", "start": "2027-02-05", "what": "Diploma thesis, February 2027 round: deadline for theses to be accepted", "el": "Λήξη προθεσμίας για αποδοχή διπλωματικών εργασιών", "tags": ["thesis", "defence", "deadline", "february"]},
+    {"p": "ug", "start": "2027-02-15", "end": "2027-02-26", "what": "Diploma thesis, February 2027 round: oral examinations", "el": "Προφορικές εξετάσεις διπλωματικών εργασιών", "tags": ["thesis", "defence", "exam", "february"]},
+    {"p": "ug", "start": "2027-03-05", "what": "Diploma thesis, February 2027 round: grades submitted", "el": "Κατάθεση βαθμολογίας διπλωματικών εργασιών", "tags": ["thesis", "defence", "grades", "february"]},
+    {"p": "ug", "start": "2027-06-11", "what": "Diploma thesis, June 2027 round: deadline to hand in the thesis", "el": "Λήξη προθεσμίας παραδόσεως διπλωματικών εργασιών", "tags": ["thesis", "defence", "deadline", "june"]},
+    {"p": "ug", "start": "2027-06-18", "what": "Diploma thesis, June 2027 round: deadline for theses to be accepted", "el": "Λήξη προθεσμίας για αποδοχή διπλωματικών εργασιών", "tags": ["thesis", "defence", "deadline", "june"]},
+    {"p": "ug", "start": "2027-06-28", "end": "2027-07-09", "what": "Diploma thesis, June 2027 round: oral examinations", "el": "Προφορικές εξετάσεις διπλωματικών εργασιών", "tags": ["thesis", "defence", "exam", "june"]},
+    {"p": "ug", "start": "2027-07-13", "what": "Diploma thesis, June 2027 round: grades submitted", "el": "Κατάθεση βαθμολογίας διπλωματικών εργασιών", "tags": ["thesis", "defence", "grades", "june"]},
+
+    {"p": "pg", "start": "2026-09-21", "end": "2026-10-09", "what": "Postgraduate winter semester: registration", "el": "Έναρξη - λήξη εγγραφών", "tags": ["winter", "registration"]},
+    {"p": "pg", "start": "2026-09-28", "end": "2027-01-08", "what": "Postgraduate winter semester classes", "el": "Έναρξη - λήξη μαθημάτων", "tags": ["winter", "classes", "semester", "start", "end"]},
+    {"p": "pg", "start": "2026-10-16", "what": "Postgraduate winter semester: coordinating schools issue the lists of students registered in each course", "el": "Έκδοση από τις Γραμματείες των συντονιζουσών Σχολών Καταλόγων εγγραφής Μ.Φ. σε κάθε μάθημα", "tags": ["winter", "registration", "lists"]},
+    {"p": "pg", "start": "2027-01-11", "end": "2027-02-05", "what": "Postgraduate winter semester exam period (and other teaching needs)", "el": "Περίοδος λοιπών εκπαιδευτικών αναγκών και εξετάσεων", "tags": ["winter", "exam"]},
+    {"p": "pg", "start": "2027-02-17", "what": "Postgraduate winter semester: grades submitted", "el": "Κατάθεση βαθμολογίας", "tags": ["winter", "grades"]},
+    {"p": "pg", "start": "2027-02-08", "end": "2027-02-17", "what": "Postgraduate spring semester: registration", "el": "Έναρξη μαθημάτων και εγγραφών - Λήξη εγγραφών", "tags": ["spring", "registration"]},
+    {"p": "pg", "start": "2027-02-08", "end": "2027-05-21", "what": "Postgraduate spring semester classes", "el": "Έναρξη μαθημάτων και εγγραφών - Λήξη μαθημάτων", "tags": ["spring", "classes", "semester", "start", "end"]},
+    {"p": "pg", "start": "2027-02-19", "what": "Postgraduate spring semester: coordinating schools issue the lists of students registered in each course", "el": "Έκδοση από τις Γραμματείες των συντονιζουσών Σχολών καταλόγων εγγραφής Μ.Φ. σε κάθε μάθημα", "tags": ["spring", "registration", "lists"]},
+    {"p": "pg", "start": "2027-05-24", "end": "2027-06-18", "what": "Postgraduate spring semester exam period (and other teaching needs)", "el": "Περίοδος λοιπών εκπαιδευτικών αναγκών και εξετάσεων", "tags": ["spring", "exam"]},
+    {"p": "pg", "start": "2027-07-02", "what": "Postgraduate spring semester: grades submitted", "el": "Κατάθεση βαθμολογίας", "tags": ["spring", "grades"]},
+
+    {"p": "pg", "start": "2027-02-01", "end": "2027-02-12", "what": "Master's thesis: window to take up a thesis", "el": "Έναρξη και λήξη προθεσμίας ανάληψης μεταπτυχιακής εργασίας", "tags": ["thesis", "assignment", "deadline"]},
+    {"p": "pg", "start": "2027-06-22", "end": "2027-07-02", "what": "Master's thesis: window to take up a thesis", "el": "Έναρξη και λήξη προθεσμίας ανάληψης μεταπτυχιακής εργασίας", "tags": ["thesis", "assignment", "deadline"]},
+    {"p": "pg", "start": "2027-09-08", "end": "2027-09-17", "what": "Master's thesis: window to take up a thesis", "el": "Έναρξη και λήξη προθεσμίας ανάληψης μεταπτυχιακής εργασίας", "tags": ["thesis", "assignment", "deadline"]},
+    {"p": "pg", "start": "2026-10-02", "what": "Master's thesis, October 2026 round: deadline to hand in the thesis", "el": "Λήξη προθεσμίας παράδοσης μεταπτυχιακής εργασίας", "tags": ["thesis", "defence", "deadline", "october"]},
+    {"p": "pg", "start": "2026-10-05", "end": "2026-10-30", "what": "Master's thesis, October 2026 round: examination", "el": "Έναρξη - λήξη εξέτασης μεταπτυχιακής εργασίας", "tags": ["thesis", "defence", "exam", "october"]},
+    {"p": "pg", "start": "2027-02-05", "what": "Master's thesis, February 2027 round: deadline to hand in the thesis", "el": "Λήξη προθεσμίας παράδοσης μεταπτυχιακής εργασίας", "tags": ["thesis", "defence", "deadline", "february"]},
+    {"p": "pg", "start": "2027-02-10", "end": "2027-02-19", "what": "Master's thesis, February 2027 round: examination", "el": "Έναρξη - λήξη εξέτασης μεταπτυχιακής εργασίας", "tags": ["thesis", "defence", "exam", "february"]},
+    {"p": "pg", "start": "2027-06-09", "what": "Master's thesis, June 2027 round: deadline to hand in the thesis", "el": "Λήξη προθεσμίας παράδοσης μεταπτυχιακής εργασίας", "tags": ["thesis", "defence", "deadline", "june"]},
+    {"p": "pg", "start": "2027-06-16", "end": "2027-07-02", "what": "Master's thesis, June 2027 round: examination", "el": "Έναρξη - λήξη εξέτασης μεταπτυχιακής εργασίας", "tags": ["thesis", "defence", "exam", "june"]},
+
+    {"p": "pg", "start": "2027-05-14", "what": "Postgraduate admissions (inter-departmental programmes): last day to publish calls for applicants", "el": "Μέχρι ΠΑ 14.05.2027: Τελευταία προθεσμία δημοσίευσης των προσκλήσεων για υποβολή υποψηφιοτήτων", "tags": ["admissions", "deadline"]},
+    {"p": "pg", "start": "2027-06-11", "what": "Postgraduate admissions (inter-departmental programmes): application deadline", "el": "Μέχρι ΠΑ 11.06.2027: Τελευταία προθεσμία υποβολής αιτήσεων από τους ενδιαφερόμενους", "tags": ["admissions", "deadline", "registration"]},
+    {"p": "pg", "start": "2027-07-09", "what": "Postgraduate admissions (inter-departmental programmes): last day for coordinating schools to publish selection results", "el": "Μέχρι ΠΑ 09.07.2027: Τελευταία προθεσμία έκδοσης αποτελεσμάτων επιλογής Μ.Φ. από τις γραμματείες συντονίζουσων σχολών", "tags": ["admissions", "results", "deadline"]},
+    {"p": "pg", "start": "2027-10-01", "what": "Postgraduate admissions (inter-departmental programmes): final student lists, from registrations", "el": "Μέχρι ΠΑ 01.10.2027: Οριστικοποίηση καταλόγου Μ.Φ. βάσει εγγραφών", "tags": ["admissions", "registration", "lists"]},
+
+    {"p": "all", "start": "2026-10-28", "what": "No classes or exams: national holiday (Ochi Day)", "el": "την 28η Οκτωβρίου", "tags": ["holiday"]},
+    {"p": "all", "start": "2026-11-17", "what": "No classes or exams: Polytechnic uprising anniversary", "el": "την 17η Νοεμβρίου", "tags": ["holiday", "polytechnic"]},
+    {"p": "all", "start": "2026-12-23", "end": "2027-01-06", "what": "No classes or exams: Christmas and New Year break", "el": "τις διακοπές των Χριστουγέννων και της Πρωτοχρονιάς, που αρχίζουν την 23η Δεκεμβρίου και λήγουν την 6η Ιανουαρίου", "tags": ["holiday", "christmas", "break", "winter"]},
+    {"p": "all", "start": "2027-01-30", "what": "No classes or exams: Three Hierarchs (education holiday)", "el": "την 30η Ιανουαρίου", "tags": ["holiday", "hierarchs"]},
+    {"p": "all", "start": "2027-03-15", "what": "No classes or exams: Clean Monday", "el": "την Καθαρή Δευτέρα", "tags": ["holiday", "clean", "lent"]},
+    {"p": "all", "start": "2027-03-25", "what": "No classes or exams: Independence Day (25 March)", "el": "την 25η Μαρτίου", "tags": ["holiday", "independence"]},
+    {"p": "all", "start": "2027-04-26", "end": "2027-05-09", "what": "No classes or exams: Easter break (Holy Monday to Thomas Sunday)", "el": "τις διακοπές του Πάσχα, που αρχίζουν τη Μεγάλη Δευτέρα και λήγουν την Κυριακή του Θωμά", "tags": ["holiday", "easter", "break", "spring"]},
+    {"p": "all", "start": "2027-05-01", "what": "No classes or exams: May Day (Labour Day)", "el": "την Πρωτομαγιά", "tags": ["holiday", "labour"]},
+    {"p": "all", "start": "2027-06-21", "what": "No classes or exams: Holy Spirit Monday", "el": "του Αγίου Πνεύματος", "tags": ["holiday", "spirit", "whit"]}
+  ]
+}
