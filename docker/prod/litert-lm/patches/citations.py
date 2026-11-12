@@ -285,7 +285,9 @@ def collect(body: dict[str, Any]) -> Offered | None:
     # shape: "[n] Title" per Senate decision, then a Sources line.
     if "wikipedia_search" in name or "academic_calendar" in name:
       found = _wikipedia(output)
-    elif "searxng_web_search" in name:
+    # ntua_news(_read) (mcp-freshrss's /freshrss-edu/mcp) answers in
+    # SearXNG's Title:/URL: blocks.
+    elif "searxng_web_search" in name or "ntua_news" in name:
       found = _searxng(output)
     elif "web_url_read" in name:
       found = _page(str(args.get("url") or ""), output)

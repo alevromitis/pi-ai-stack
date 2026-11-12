@@ -235,6 +235,15 @@ mcpServers:
     description: 'Feeds and unread articles; mark read, star, subscribe.'
     # rss_read may fetch a title-only item's page and PDFs (60 s cap).
     timeout: 90000
+  # NTUA announcements only (FreshRSS category Edu: EMP + <feed> feeds),
+  # read-only, never marks anything read: ntua_news + ntua_news_read for the
+  # Instagram NTUA group agent (instagram-personal setup_agent.py).
+  ntua-news:
+    type: streamable-http
+    url: 'http://mcp-freshrss-1:8000/freshrss-edu/mcp'
+    title: 'NTUA News'
+    description: 'NTUA and <feed> announcements, news and events from FreshRSS.'
+    timeout: 90000
   calendar:
     type: streamable-http
     url: 'http://mcp-nextcloud-1:8000/calendar/mcp'
