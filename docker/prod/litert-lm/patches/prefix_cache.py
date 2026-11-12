@@ -79,6 +79,7 @@ from typing import Any
 import click
 
 import litert_lm
+from litert_lm_cli.commands.serve import translation as _translation
 from litert_lm import conversation as _conversation_module
 
 _ENABLED = os.environ.get("LITERT_PREFIX_CACHE", "1") != "0"
@@ -527,6 +528,15 @@ def _new_chat(engine, key, canonical, messages, translated_messages,
 
   Most recently used last; created if none matches.
   """
+  if _translation._native_instagram(messages):
+    # Initial snapshot clones exceeded the Pi's memory budget in search
+    # probes. Retain compatible continuation/tool-round reuse without clones.
+    if _snapshots:
+      while _snapshots:
+        _close_snapshot("Instagram uses a fresh initial conversation")
+      _trim()
+      _save_warm()
+    return None
   if (not _MAX_SNAPSHOTS or len(messages) < 2
       or messages[-1].get("role") != "user"
       or any(m.get("role") != "system" for m in messages[:-1])):

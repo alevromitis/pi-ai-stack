@@ -48,6 +48,7 @@ import click
 _ENABLED = os.environ.get("LITERT_TRANSLATE", "1") != "0"
 _URL = os.environ.get("LITERT_TRANSLATE_URL", "http://mcp-translate-1:8000/api/translate")
 _MIN_CONF = float(os.environ.get("LITERT_TRANSLATE_MIN_CONF", "0.8"))
+_NATIVE_INSTAGRAM = "[instagram-personal:native]"
 # A long reply takes ~1 s a sentence on the Pi.
 _TIMEOUT_S = 120
 _CACHE_SIZE = 512
@@ -88,11 +89,57 @@ def _to_english(text: str) -> tuple[str | None, str]:
   return found
 
 
+def _native_instagram(messages: list[Any]) -> bool:
+  # Only trusted system/developer instructions can select this route. A user
+  # message, tool result or retrieved page containing the marker cannot.
+  for message in messages:
+    if not isinstance(message, dict) or message.get("role") not in ("system", "developer"):
+      continue
+    content = message.get("content")
+    if isinstance(content, list):
+      content = "".join(part.get("text", "") for part in content
+                        if isinstance(part, dict) and part.get("type") == "text")
+    if isinstance(content, str) and _NATIVE_INSTAGRAM in content:
+      return True
+  return False
+
+
+def _bound_instagram_search(messages: list[Any]) -> None:
+  # Search result prose is expensive to prefill on the Pi. Keep a bounded
+  # excerpt; leave calculator results, user text and other chats untouched.
+  names = {"searxng_web_search_mcp_searxng"}
+  call_ids = {call.get("id") for message in messages if isinstance(message, dict)
+              for call in (message.get("tool_calls") or [])
+              if isinstance(call, dict) and call.get("id") is not None
+              and (call.get("function") or {}).get("name") in names}
+  for message in messages:
+    if not isinstance(message, dict) or message.get("role") != "tool":
+      continue
+    if message.get("name") not in names and message.get("tool_call_id") not in call_ids:
+      continue
+    content = message.get("content")
+    if isinstance(content, list) and all(isinstance(part, dict) and part.get("type") == "text"
+                                        and isinstance(part.get("text"), str) for part in content):
+      content = "\n".join(part["text"] for part in content)
+    if not isinstance(content, str) or len(content.encode("utf-8")) <= 1200:
+      continue
+    excerpt = content.encode("utf-8")[:1200].decode("utf-8", "ignore")
+    # Avoid a half URL/line when the result contains line breaks.
+    if "\n" in excerpt:
+      excerpt = excerpt.rsplit("\n", 1)[0]
+    message["content"] = excerpt + "\n[search output shortened]"
+    _log("Instagram search result bounded to 1200 bytes")
+
+
 def apply(handler: Any, body: dict[str, Any]) -> None:
   """Translates the user messages in place; remembers the reply's language."""
   handler.translate_back = None
   messages = body.get("messages")
   if not _ENABLED or not isinstance(messages, list):
+    return
+  if _native_instagram(messages):
+    _bound_instagram_search(messages)
+    _log("Instagram native-language route: translation bypassed")
     return
   language = ""
   for msg in messages:

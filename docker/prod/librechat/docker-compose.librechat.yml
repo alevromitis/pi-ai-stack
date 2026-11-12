@@ -59,6 +59,8 @@ services:
       MEILI_HOST: http://librechat-meilisearch-1:7700
       SEARCH: "true"
       CONFIG_PATH: /app/librechat.yaml
+      NODE_OPTIONS: "--require=/app/instagram-routing/loader.cjs"
+      DEPLOYMENT_SKILLS_DIR: /app/instagram-deployment-skills
       # Setting it turns on file search (agents' file_search tool).
       RAG_API_URL: http://librechat-rag-api-1:8000
     env_file:
@@ -114,6 +116,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
       # Admin config (custom endpoints, interface), read-only.
       - ./librechat-config/librechat.yaml:/app/librechat.yaml:ro
+      - ../../dev/instagram-personal/librechat-routing:/app/instagram-routing:ro
+      - ../../dev/instagram-personal/deployment-skills:/app/instagram-deployment-skills:ro
       - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/uploads:/app/uploads
       - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/images:/app/client/public/images
       - ${LIBRECHAT_DATA_DIR:?set LIBRECHAT_DATA_DIR in .env}/logs:/app/logs

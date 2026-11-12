@@ -12,6 +12,29 @@ docker compose -f docker-compose.librechat.yml up -d
 
 ## Layout
 
+The **E2B Instagram** model choice (`pi-instagram`, `gemma4-e2b`) attaches
+the separate personal Instagram bridge over `agent-tools-internal`.
+Its shared key is `INSTAGRAM_PERSONAL_API_KEY` in `.env.librechat`, matching
+the bridge's `BRIDGE_API_KEY`. Both reply tools run without approval prompts. Plain E2B
+chat can also select Instagram Personal from the tool picker.
+See [Instagram Personal setup](../../dev/instagram-personal/README.md) for
+account login and limits. Tool discovery works before Instagram login;
+inbox/media access requires the user to provision their own session locally.
+
+**E2B Group Mentions** selects the saved private agent
+`agent_instagram_group_mentions`. The personal bridge invokes it through the
+LibreChat Agents API only for unprocessed `@kathisterimeno_bot` mentions (including fetched history) in configured Instagram
+groups, then delivers one deduplicated reply to the source group. Ordinary
+messages do not invoke the model. The agent uses only calculator, text-counting
+and compact web-search tools, isolated agent memory, thinking off, a 4096-token
+context and 512-token output limit. Instagram system instructions carry
+`[instagram-personal:native]`, bypassing Argos for these requests and replies;
+other chats retain translation. Already-fetched queued mentions drain serially
+without send or per-request cooldown in this deployment, within the 32-send
+rolling daily budget. The manual Instagram preset also bypasses Argos and uses
+a smaller context/output allowance with thinking disabled.
+See the bridge README for group allowlists, polling latency and startup steps.
+
 ```
 .
 ├── docker-compose.librechat.yml   # librechat + mongodb + meilisearch + rag_api + vectordb

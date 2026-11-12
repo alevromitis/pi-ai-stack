@@ -104,12 +104,15 @@ services:
       # Persists the LiteRT-LM model registry + config.json across restarts
       # so models aren't re-downloaded every time the container starts.
       - litert-registry:/root/.litert-lm
-    ports:
-      - "${APP_PORT:-9379}:${APP_CONTAINER_PORT:-9379}"
+      # Per-request Instagram bypass; Python path matches the pinned image.
+      - ./patches/translation.py:/opt/venv/lib/python3.13/site-packages/litert_lm_cli/commands/serve/translation.py:ro
+      - ./patches/prefix_cache.py:/opt/venv/lib/python3.13/site-packages/litert_lm_cli/commands/serve/prefix_cache.py:ro
     networks:
-      - external
+      chat-backend:
+        aliases:
+          - litert-chat-upstream
       # mcp-translate only (patches/translation.py); owned by agent-tools.
-      - translate
+      translate: {}
     mem_limit: "${LITERT_MEM_LIMIT:-7g}"
     mem_reservation: "${LITERT_MEM_RESERVATION:-4g}"
     # Equal to mem_limit = no extra swap allowed for this container at all.
@@ -121,6 +124,26 @@ services:
     # stalls the whole step. With the Pi's normal background load
     # (2026-10-12, 16k context): prefill 60 -> 75 tok/s, decode 6.3 -> 7.4.
     cpu_shares: 262144
+
+  litert-chat-gateway:
+    image: litert-lm-rpi5:local
+    pull_policy: never
+    container_name: litert-chat-gateway-1
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    entrypoint: ["python", "/gateway/litert_chat_gateway.py"]
+    environment:
+      UPSTREAM_HOST: litert-chat-upstream
+    volumes:
+      - ../../dev/instagram-personal/librechat-routing/litert_chat_gateway.py:/gateway/litert_chat_gateway.py:ro
+    ports:
+      - "${APP_PORT:-9379}:9379"
+    networks:
+      external:
+        aliases:
+          - litert-lm-1
+      chat-backend: {}
 
   # Embeddings for LibreChat's rag_api (../librechat). A second server, not a
   # second model on litert-lm-1: `serve` is a single-threaded HTTPServer, so
@@ -167,6 +190,11 @@ volumes:
   litert-embed-registry:
 
 networks:
+  chat-backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.40.0/24
   external:
     driver: bridge
     name: litert-lm-external
