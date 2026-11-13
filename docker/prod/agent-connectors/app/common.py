@@ -345,9 +345,17 @@ def new_server(name: str) -> MCPServer:
     return MCPServer(name, log_level="WARNING", warn_on_duplicate_tools=False)
 
 
-def serve(servers: dict[str, MCPServer], name: str, on_start: Callable[[], Any] | None = None) -> None:
+def serve(
+    servers: dict[str, MCPServer],
+    name: str,
+    on_start: Callable[[], Any] | None = None,
+    routes: list[Route] | None = None,
+) -> None:
     """Serve each server at /<path>/mcp, plus /healthz, on MCP_PORT; or, with
     MCP_TRANSPORT=stdio, all their tools as one server called name.
+
+    routes: plain HTTP routes served next to them (not over stdio), for
+    callers that are programs, not models.
 
     on_start: a coroutine function run once at HTTP startup, before requests
     (e.g. to fill tool schemas from the service); a failure is logged, not fatal."""
@@ -395,10 +403,10 @@ def serve(servers: dict[str, MCPServer], name: str, on_start: Callable[[], Any] 
     async def healthz(_request: Request) -> PlainTextResponse:
         return PlainTextResponse("ok")
 
-    routes: list[Route | Mount] = [Route("/healthz", healthz)]
-    routes += [Mount(f"/{path}", app=app) for path, app in apps.items()]
+    served: list[Route | Mount] = [Route("/healthz", healthz), *(routes or [])]
+    served += [Mount(f"/{path}", app=app) for path, app in apps.items()]
     uvicorn.run(
-        Starlette(routes=routes, lifespan=lifespan),
+        Starlette(routes=served, lifespan=lifespan),
         host="0.0.0.0",
         port=env_int("MCP_PORT", 8000),
         log_level="warning",

@@ -16,6 +16,7 @@ pauses every write tool for approval (`endpoints.agents.toolApproval` in
 | Endpoint | Container | Tools | Talks to |
 |---|---|---|---|
 | `/freshrss/mcp` | `mcp-freshrss-1` | `rss_feeds`, `rss_items`, `rss_read`, `rss_mark`, `rss_mark_all_read`, `rss_subscribe` | FreshRSS's Google Reader API, `freshrss-1:80` |
+| `GET /feeds/edu` (plain JSON, not MCP) | `mcp-freshrss-1` | none: the Edu category's latest items (id, title, url, feed, published, crawled) for instagram-personal's RSS poster (`feeds.py`); read-only, marks nothing read | FreshRSS's Google Reader API |
 | `/calendar/mcp` | `mcp-nextcloud-1` | `events`, `event_add`, `event_edit` (`event_delete`) | CalDAV (VEVENT) |
 | `/tasks/mcp` | `mcp-nextcloud-1` | `tasks`, `task_add`, `task_edit` (`task_delete`) | CalDAV (VTODO, as the Tasks app stores them) |
 | `/notes/mcp` | `mcp-nextcloud-1` | `notes`, `note_read`, `note_add`, `note_append`, `note_edit` (`note_delete`) | Notes app REST API v1 |

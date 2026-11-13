@@ -14,9 +14,13 @@ from urllib.parse import quote
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from common import (
     TZ,
+    log,
     clip,
     env,
     env_flag,
@@ -405,5 +409,34 @@ async def read_announcement(url: Annotated[str, Field(description="An item's URL
     )
 
 
+async def edu_items(_request: Request) -> JSONResponse:
+    """GET /feeds/edu: the Edu category's latest items (every feed in it), as
+    JSON, for instagram-personal's feed poster: a program, not a model, so no
+    MCP and no tool text. Read-only, never marks anything read. Newest crawled
+    first; ids are FreshRSS's decimal entry ids, crawled and published are
+    unix seconds."""
+    stream = quote(f"user/-/label/{EDU_CATEGORY}", safe="/")
+    try:
+        items = (await reader.get(f"stream/contents/{stream}", n=str(EDU_SCAN))).get("items", [])
+    except Exception as exc:  # FreshRSS down or the API password rejected
+        log.warning("GET /feeds/edu failed: %s: %s", type(exc).__name__, exc)
+        return JSONResponse({"error": "FreshRSS unavailable"}, status_code=502)
+    return JSONResponse({
+        "category": EDU_CATEGORY,
+        "items": [
+            {
+                "id": _item_id(item),
+                "title": one_line(_title(item), 300),
+                "url": _link(item),
+                "feed": _feed(item),
+                "source": _source(item),
+                "published": int(item.get("published", 0)),
+                "crawled": int(item.get("crawlTimeMsec", 0)) // 1000,
+            }
+            for item in items
+        ],
+    })
+
+
 if __name__ == "__main__":
-    serve({"freshrss": mcp, "freshrss-edu": edu}, name="freshrss")
+    serve({"freshrss": mcp, "freshrss-edu": edu}, name="freshrss", routes=[Route("/feeds/edu", edu_items)])
