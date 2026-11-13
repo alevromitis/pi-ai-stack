@@ -145,9 +145,24 @@ def _concepts(query: str) -> tuple[set[str], bool, set[int]]:
     return tags, postgrad, months
 
 
+_GR_DAYS = ("Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή")
+_GR_MONTHS = ("Ιανουαρίου", "Φεβρουαρίου", "Μαρτίου", "Απριλίου", "Μαΐου", "Ιουνίου", "Ιουλίου",
+              "Αυγούστου", "Σεπτεμβρίου", "Οκτωβρίου", "Νοεμβρίου", "Δεκεμβρίου")
+
+
+def _greek(d: datetime.date) -> str:
+    return f"{_GR_DAYS[d.weekday()]} {d.day} {_GR_MONTHS[d.month - 1]} {d.year}"
+
+
 def _when(e: Entry) -> str:
+    # Greek first, written like the NTUA group's source files: the Pi model
+    # mistranslated "Mon 18 January 2027" (Κυριακή, Ιανουαρίου for February)
+    # but copies a Greek date as given. English follows for other languages.
     fmt = lambda d: f"{d:%a} {d.day} {d:%B %Y}"
-    return fmt(e.start) if e.start == e.end else f"{fmt(e.start)} to {fmt(e.end)}"
+    if e.start == e.end:
+        return f"{_greek(e.start)} ({fmt(e.start)})"
+    return (f"από {_greek(e.start)} έως {_greek(e.end)} "
+            f"({fmt(e.start)} to {fmt(e.end)})")
 
 
 def _status(e: Entry, today: datetime.date) -> str:
@@ -240,7 +255,7 @@ def search(query: str = "", start: str = "", end: str = "", today: datetime.date
 
     if today > COVERS[1]:
         notes.insert(0, f"Warning: this is the {COVERS[0].year}-{COVERS[1].year} calendar; the current one is not loaded.")
-    out = [f"Today is {today:%A} {today.day} {today:%B %Y}."] + notes
+    out = [f"Today is {_greek(today)} ({today:%A} {today.day} {today:%B %Y})."] + notes
     cited = []
     for n, key in enumerate(k for k in ("ug", "pg") if groups[k]):
         src = SOURCES[key]
