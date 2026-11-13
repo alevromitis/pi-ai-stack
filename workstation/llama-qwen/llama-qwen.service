@@ -56,6 +56,14 @@ EnvironmentFile=%h/.config/llama-qwen/env
 #                 checking and thinks longer: too long for the 20k window.
 #                 Medium adds no line. A request's own chat_template_kwargs
 #                 overrides it.
+#   --reasoning-budget 6144 (+ message)  ends the thinking after 6144 tokens
+#                 and makes the model answer. 2026-11-13 an Instagram mention
+#                 ran 8192 tokens (= max_tokens, 609 s) without an answer and
+#                 LibreChat returned a 500. 6144 leaves ~2k of the 8192 for
+#                 the reply. The message is written as the model's own last
+#                 thought: an imperative ("Time is up: stop thinking and
+#                 write the answer now.") let it carry on working in the
+#                 visible reply and hit 8192 anyway (test 2026-11-13).
 #   --jinja       the model's chat template: thinking (as reasoning_content)
 #                 and tool calls, parsed to OpenAI tool_calls.
 # Measured 2026-11-13: 15.6 tok/s generation and 432 tok/s prefill at depth 0,
@@ -69,6 +77,8 @@ ExecStart=/usr/bin/llama-server \
     -ngl 99 -fa off -c 20480 -ub 256 -np 1 \
     --ctx-checkpoints 8 --checkpoint-min-step 1024 --cache-ram 1024 \
     --jinja --chat-template-kwargs '{"reasoning_effort":"medium"}' \
+    --reasoning-budget 6144 \
+    --reasoning-budget-message "I have run out of thinking time. I will now give my final answer directly and briefly, with no further working or checking." \
     --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 --repeat-penalty 1.0 \
     --no-webui
 Restart=always
