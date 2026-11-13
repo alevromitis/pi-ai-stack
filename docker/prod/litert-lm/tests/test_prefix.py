@@ -40,3 +40,25 @@ class NativePrefixTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MemoryAgentBypassTests(unittest.TestCase):
+    def setUp(self):
+        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_one_off')
+        import collections.abc
+        from typing import Any
+        self.env = {'collections': collections, 'Any': Any, '_log': Mock(),
+                    '_ONE_OFF_TOOLS': frozenset({'set_memory', 'delete_memory'})}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), 'prefix_cache.py', 'exec'), self.env)
+
+    @staticmethod
+    def _tools(*names):
+        return [{'type': 'function', 'function': {'name': n}} for n in names]
+
+    def test_memory_agent_request_bypasses_cache(self):
+        self.assertTrue(self.env['_one_off']({'tools': self._tools('set_memory', 'delete_memory')}))
+
+    def test_chat_with_other_tools_is_cached(self):
+        self.assertFalse(self.env['_one_off']({'tools': self._tools('set_memory', 'delete_memory', 'calc')}))
+        self.assertFalse(self.env['_one_off']({'tools': self._tools('calc')}))
+        self.assertFalse(self.env['_one_off']({}))

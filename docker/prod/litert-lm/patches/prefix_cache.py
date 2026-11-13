@@ -99,6 +99,10 @@ _last_request = time.monotonic()
 # The container's own cgroup (v2, private cgroup namespace).
 _MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
 _REUSABLE_ROLES = ("user", "tool")
+# LibreChat's memory agent (memory_gate.py): a one-off request that is never
+# continued. Cached, it would close the system-prompt snapshot for its own
+# and push a chat out of the cache, so the chat's next reply re-prefills it.
+_ONE_OFF_TOOLS = frozenset({"set_memory", "delete_memory"})
 # With MTP on, a conversation cloned from a snapshot, or one continuing such
 # a clone, sometimes fails in the drafter before its first token: "Cannot
 # auto-resize tensor kv_cache_k_N: no dims_signature exists", "Failed to
@@ -572,6 +576,18 @@ def _new_chat(engine, key, canonical, messages, translated_messages,
   return snap
 
 
+def _one_off(body: collections.abc.Mapping[str, Any]) -> bool:
+  tools = body.get("tools")
+  if not isinstance(tools, list):
+    return False
+  names = {(t.get("function") or {}).get("name")
+           for t in tools if isinstance(t, dict)}
+  if names != _ONE_OFF_TOOLS:
+    return False
+  _log("bypass: memory agent request, not cached")
+  return True
+
+
 @contextlib.contextmanager
 def conversation(
     engine,
@@ -587,7 +603,8 @@ def conversation(
   Drop-in for `engine.create_conversation(messages=translated[:-1], ...)`.
   """
   messages = body.get("messages")
-  if not _ENABLED or not isinstance(messages, list) or not messages:
+  if (not _ENABLED or not isinstance(messages, list) or not messages
+      or _one_off(body)):
     with engine.create_conversation(
         messages=translated_messages[:-1] if translated_messages else [],
         **create_kwargs,

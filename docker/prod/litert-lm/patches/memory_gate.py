@@ -7,9 +7,8 @@ With `memory.agent.enabled` in librechat.yaml, LibreChat sends a second
 request with every chat message: the last few messages plus two tools,
 set_memory and delete_memory, and instructions to call them only when the
 user asks to remember or forget something. `serve` is single-threaded, so
-that request queues next to the reply, and it takes one of the prefix
-cache's few conversation slots (prefix_cache.py; until 2026-10-12 the only
-one, so every reply re-prefilled the whole chat).
+that request queues next to the reply. (prefix_cache.py serves the ones
+that pass here outside its cache, so they don't displace a chat.)
 
 When a request's tools are exactly those two and the newest user turn names
 no memory action, this answers "no tool call" at once, without touching the
