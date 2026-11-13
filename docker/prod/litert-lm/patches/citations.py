@@ -285,10 +285,10 @@ def collect(body: dict[str, Any]) -> Offered | None:
     # shape: "[n] Title" per Senate decision, then a Sources line.
     if "wikipedia_search" in name or "academic_calendar" in name:
       found = _wikipedia(output)
-    # semfe_announcements, ntua_news and read_announcement (mcp-freshrss's
-    # /freshrss-edu/mcp) answer in SearXNG's Title:/URL: blocks.
-    elif ("searxng_web_search" in name or "ntua_news" in name
-          or "semfe_announcements" in name or "read_announcement" in name):
+    # samps_announcements, ntua_news, uniaction_events and read_feed_item
+    # (mcp-freshrss's /freshrss-feeds/mcp) answer in SearXNG's Title:/URL: blocks.
+    elif ("searxng_web_search" in name or "ntua_news" in name or "samps_announcements" in name
+          or "uniaction_events" in name or "read_feed_item" in name):
       found = _searxng(output)
     elif "web_url_read" in name:
       found = _page(str(args.get("url") or ""), output)
