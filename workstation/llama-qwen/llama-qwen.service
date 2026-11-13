@@ -1,58 +1,75 @@
-# Qwen3.5-9B on the workstation's Arc B570 (llama.cpp, Vulkan), for
-# LibreChat on rpi. A systemd *user* unit: it runs while the user is logged
-# in; while it is down, LibreChat's Qwen chats fail.
+# Qwen3.8-27B (Unsloth UD-IQ2_XXS) on the workstation's Arc B570 (llama.cpp,
+# Vulkan), for LibreChat on rpi. A systemd *user* unit: it runs while the user
+# is logged in; while it is down, LibreChat's Qwen chats fail.
 #
 # Install (README.md beside this file):
 #   install -Dm644 llama-qwen.service ~/.config/systemd/user/llama-qwen.service
 #   systemctl --user daemon-reload && systemctl --user enable --now llama-qwen
 #
 # Needs the Arch `llama-cpp` package (ggml-vulkan), the model at
-# ~/models/Qwen3.5-9B-Q4_K_M.gguf, ~/.config/llama-qwen/api-keys (mode
-# 600, one key per line; the same key is QWEN_API_KEY in librechat's
-# .env.librechat) and ~/.config/llama-qwen/env with LLAMA_QWEN_HOST=<the
-# workstation's tailnet IPv4>.
+# ~/models/Qwen3.8-27B-UD-IQ2_XXS.gguf, the matching vision/video projector at
+# ~/models/Qwen3.8-27B-mmproj-F16.gguf (both from unsloth/Qwen3.8-27B-GGUF),
+# ~/.config/llama-qwen/api-keys (mode 600, one key per line; the same key is
+# QWEN_API_KEY in librechat's .env.librechat) and ~/.config/llama-qwen/env
+# with LLAMA_QWEN_HOST=<the workstation's tailnet IPv4>.
 
 [Unit]
-Description=llama-server: Qwen3.5-9B for LibreChat
+Description=llama-server: Qwen3.8-27B for LibreChat
 After=network-online.target
 
 [Service]
 EnvironmentFile=%h/.config/llama-qwen/env
-# Flags, 2026-10-10 (Arc B570 10 GB; ~8 GB free beside the desktop):
+# Flags, 2026-11-13 (Arc B570 10 GB; budget: llama-server <= 9600 MB VRAM,
+# measured from drm-total-vram0 in /proc/<pid>/fdinfo):
 #   --host        the tailnet address only (LLAMA_QWEN_HOST, from the env
 #                 file); rpi reaches it over Tailscale. Fails until
 #                 tailscaled has the address, hence Restart.
-#   -ngl 99       every layer on the GPU (~4.9 GB).
-#   -fa off       flash attention is slow on this Vulkan build: at 16k depth
-#                 41 vs 30 tok/s generation, 841 vs 291 tok/s prefill.
-#   -c 49152      48k context: room for Qwen's recommended 32768-token reply
-#                 (model card) plus history. f16 KV (1.5 GiB) + the non-FA
-#                 attention buffer. At 64k the desktop's own use filled VRAM
-#                 and decode fell to 20 tok/s.
-#                 A q8_0 cache isn't possible with FA off: V needs FA, and a
-#                 q8_0 K adds a large dequant buffer.
+#   -ngl 99       every layer on the GPU (6.7 GiB of weights). Only 2-bit
+#                 fits; Q3 and up would spill weights to RAM (dense model:
+#                 every spilled GB slows every token).
+#   -c 20480 -fa off -ub 256
+#                 20k context (the user's choice, 2026-11-13), f16 KV. 32k
+#                 measured ~8600 MiB, so 20k leaves headroom; one 32k start
+#                 read 9488 MiB, not reproduced. Flash attention on with a
+#                 q8_0 KV fits 64k (9142 MiB) but is far slower on this
+#                 Vulkan build: at 16k depth 5.8 vs 14.1 tok/s generation,
+#                 69 vs 193 tok/s prefill. With FA off the attention scratch
+#                 grows with the ubatch; -ub 256 (default 512) is what makes
+#                 32k fit, costing only some prefill speed. 48k with FA off
+#                 does not fit.
+#   --mmproj ... --no-mmproj-offload
+#                 vision/video projector kept in system RAM and run on the
+#                 CPU: no VRAM, slower only when a chat sends an image.
 #   -np 1         one slot: the whole context for one chat; requests queue.
-#   --ctx-checkpoints / --checkpoint-min-step  Qwen3.5's DeltaNet layers
-#                 can't rewind, so reusing a chat's cache on the next turn
-#                 needs a saved state near the end of the last prompt
-#                 (~50 MB host RAM each; at most 8).
+#   --ctx-checkpoints / --checkpoint-min-step  the DeltaNet layers can't
+#                 rewind, so reusing a chat's cache on the next turn needs a
+#                 saved state near the end of the last prompt (host RAM).
 #   --cache-ram   host-RAM prompt cache, so a title request doesn't throw
 #                 away the chat's cache. Kept small: the host is short of RAM.
-#   sampling      Qwen's recommendation for thinking mode, general tasks
-#                 (model card): temp 1.0, top_p 0.95, top_k 20, min_p 0,
-#                 presence_penalty 1.5, repetition_penalty 1.0. LibreChat
-#                 sends its own per request.
+#   sampling      Qwen/Unsloth's recommendation for thinking mode (model
+#                 card): temp 1.0, top_p 0.95, top_k 20, min_p 0,
+#                 presence_penalty 0, repetition_penalty 1.0. LibreChat may
+#                 send its own per request.
+#   --chat-template-kwargs reasoning_effort medium (the user's choice,
+#                 2026-11-13; Unsloth's documented switch). The template's
+#                 default, xhigh, adds a system line asking for extra
+#                 checking and thinks longer: too long for the 20k window.
+#                 Medium adds no line. A request's own chat_template_kwargs
+#                 overrides it.
 #   --jinja       the model's chat template: thinking (as reasoning_content)
-#                 and tool calls (Qwen3-Coder XML, parsed to OpenAI tool_calls).
+#                 and tool calls, parsed to OpenAI tool_calls.
+# Measured 2026-11-13: 15.6 tok/s generation and 432 tok/s prefill at depth 0,
+# 14.1 / 193 at 16k (the 9B it replaced: 44 / 1180).
 ExecStart=/usr/bin/llama-server \
-    --model %h/models/Qwen3.5-9B-Q4_K_M.gguf \
-    --alias qwen3.5-9b \
+    --model %h/models/Qwen3.8-27B-UD-IQ2_XXS.gguf \
+    --mmproj %h/models/Qwen3.8-27B-mmproj-F16.gguf --no-mmproj-offload \
+    --alias qwen3.8-27b \
     --host ${LLAMA_QWEN_HOST} --port 8091 \
     --api-key-file %h/.config/llama-qwen/api-keys \
-    -ngl 99 -fa off -c 49152 -np 1 \
+    -ngl 99 -fa off -c 20480 -ub 256 -np 1 \
     --ctx-checkpoints 8 --checkpoint-min-step 1024 --cache-ram 1024 \
-    --jinja \
-    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5 --repeat-penalty 1.0 \
+    --jinja --chat-template-kwargs '{"reasoning_effort":"medium"}' \
+    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 --repeat-penalty 1.0 \
     --no-webui
 Restart=always
 RestartSec=15

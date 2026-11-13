@@ -1,12 +1,17 @@
 # Qwen on the workstation (the default model)
 
-New chats default to **Qwen3.5-9B** (Q4_K_M) on the workstation's Arc B570,
+New chats default to **Qwen3.8-27B** (Unsloth UD-IQ2_XXS, since 2026-11-13;
+Qwen3.5-9B Q4_K_M before) on the workstation's Arc B570,
 served by llama.cpp's `llama-server` (Vulkan) as the systemd *user* unit
 [`llama-qwen.service`](llama-qwen.service) on port 8091 of the
 workstation's tailnet address (tailnet only, API key required). The unit file
-explains each flag. In short: 48k context, f16 KV cache, flash attention off
-(slower on this Vulkan build), one slot, Qwen's recommended thinking-mode
-sampling. That gives ~42 tok/s generation and ~1000 tok/s prefill (2026-10-10).
+explains each flag. In short: all layers on the GPU (~8.6 GiB of VRAM, under
+a 9600 MB budget), 20k context, f16 KV cache, flash attention off (2.5x
+slower on this Vulkan build), `-ub 256`, the vision projector on the CPU,
+one slot, Qwen's recommended thinking-mode sampling, reasoning effort medium
+(the template defaults to xhigh, which thinks too long for 20k). That gives ~15 tok/s
+generation and ~430 tok/s prefill (14 / 190 with 16k in context;
+2026-11-13). The 9B did ~42 and ~1000.
 
 ```bash
 install -Dm644 workstation/llama-qwen/llama-qwen.service ~/.config/systemd/user/
@@ -35,7 +40,7 @@ user is logged in; `loginctl enable-linger` would keep it up without a login.
   translate are added from the input bar. `qwen-organiser` is Qwen with the
   calendar, tasks, notes and feeds, kept apart from the web tools (see the
   comment in `librechat.yaml`). The MongoDB preset
-  **Qwen 9B - Thinker** is a copy of it and is the user's default preset.
+  **Qwen 27B - Thinker** is a copy of it and is the user's default preset.
   LibreChat's own default-preset path ignores the spec, and presets carry no
   MCP selection. The memory agent stays on LiteRT-LM, whose memory gate
   answers most of its requests without the model.
@@ -43,10 +48,11 @@ user is logged in; `loginctl enable-linger` would keep it up without a login.
   tool calls into OpenAI `tool_calls`, several per step. The Pi-only crutches
   (`citations.py`, `reminder.py`) are not needed and apply only while the Pi
   answers.
-* **Context.** 49152 Qwen tokens server-side; 64k left the desktop too
-  little VRAM (decode fell to 20 tok/s). `tokenConfig` and the spec set
-  47104. `qwen-chat` gives the reply `max_tokens: 20480`, thinking included,
-  so history and tool results get up to 26624 (`qwen-organiser`: 16384 and
-  30720). It was Qwen's recommended 32768 until 2026-11-06, which left
-  14336: too little for the larger tools (~3-4k tokens a call). Hard maths
-  took 8-14k tokens on this card (2026-10-10).
+* **Context.** 20480 Qwen tokens server-side (the user's choice; 32k also
+  fits, 64k only with flash attention and a q8 KV at 5.8 tok/s).
+  `tokenConfig` and the specs set 19456. `qwen-chat` gives the reply
+  `max_tokens: 8192`, thinking included, so the prompt, history and tool
+  results get ~11k (`qwen-organiser`: 6144 and ~13k). Hard problems may
+  think past 8192 and be cut off. On 2026-11-13 the 22 existing Qwen chats
+  were set to the same limits (backup: `~/librechat-qwen-backup-20261113.json`
+  on rpi). Before: 49152 server-side, 47104 / 20480 for the 9B.

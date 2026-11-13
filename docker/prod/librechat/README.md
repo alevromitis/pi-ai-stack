@@ -207,8 +207,8 @@ Model specs, one per task, each attaching only the servers it needs:
 
 | Spec | Model | MCP servers | Tool-schema cost |
 |---|---|---|---|
-| `qwen-chat` (soft default) | Qwen3.5-9B | `wikipedia-large`, `searxng-large`, `calc`, `sandbox` | ~2.8k tokens, ~3 s of GPU prefill |
-| `qwen-organiser` (*Qwen Organiser*) | Qwen3.5-9B | `lookup`, `calendar`, `tasks`, `notes`, `freshrss`, `calc` (+ `mail` once enabled); temperature 0.6, presence_penalty 0 | ~2.2k tokens, ~2 s of GPU prefill |
+| `qwen-chat` (soft default) | Qwen3.8-27B | `wikipedia-large`, `searxng-large`, `calc`, `sandbox` | ~2.8k tokens, ~3 s of GPU prefill |
+| `qwen-organiser` (*Qwen Organiser*) | Qwen3.8-27B | `lookup`, `calendar`, `tasks`, `notes`, `freshrss`, `calc` (+ `mail` once enabled); temperature 0.6, presence_penalty 0 | ~2.2k tokens, ~2 s of GPU prefill |
 | `pi-chat` | gemma4-e2b | none (add from the input bar) | — |
 | `pi-calendar` (*Calendar*) | gemma4-e2b | `calendar`, `tasks`, `freshrss` | ~1.2k tokens |
 
@@ -336,7 +336,7 @@ that line together. From v0.8.8 the image is `ghcr.io/librechat-ai/librechat`.
 
 ## The Qwen endpoint (the default model)
 
-New chats default to Qwen3.5-9B on the workstation's GPU, LibreChat's `Qwen`
+New chats default to Qwen3.8-27B on the workstation's GPU, LibreChat's `Qwen`
 custom endpoint (`QWEN_BASE_URL`, `QWEN_API_KEY` in `.env.librechat`). The
 server, the `qwen-chat` spec and its context settings are in
 [workstation/llama-qwen](../../../workstation/llama-qwen/README.md).

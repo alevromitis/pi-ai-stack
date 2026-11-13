@@ -81,7 +81,7 @@ endpoints:
           prompt: 0
           completion: 0
           context: 13312
-    # Qwen3.5-9B on the workstation's GPU (workstation/llama-qwen), over the
+    # Qwen3.8-27B (UD-IQ2_XXS) on the workstation's GPU (workstation/llama-qwen), over the
     # tailnet. No fallback: while the workstation is off, requests fail;
     # switch to a LiteRT-LM spec or preset by hand. URL and key are in
     # .env.librechat, like LiteRT-LM's.
@@ -91,13 +91,13 @@ endpoints:
       models:
         fetch: false
         default:
-          - 'qwen3.5-9b'
+          - 'qwen3.8-27b'
       titleConvo: true
       titleModel: 'current_model'
       # llama-server has one slot: a title request during the reply would
       # queue the reply behind it.
       titleTiming: 'final'
-      modelDisplayLabel: 'Qwen3.5 9B'
+      modelDisplayLabel: 'Qwen3.8 27B'
       # Send Qwen's reasoning back with its own tool calls within a reply.
       # Without it the chat template shows those steps with an empty
       # <think>, and Qwen copies that: it ended 11 of 18 replays of a
@@ -107,20 +107,26 @@ endpoints:
       customParams:
         includeReasoningContent: true
       # Qwen's recommended thinking-mode sampling (model card): temperature
-      # 1.0, top_p 0.95, top_k 20, min_p 0, presence_penalty 1.5. The
+      # 1.0, top_p 0.95, top_k 20, min_p 0, presence_penalty 0. The
       # parameters panel has no top_k/min_p, so they go on every request;
       # the rest are set per preset or spec.
       addParams:
         top_k: 20
         min_p: 0
-      # llama-server's window is 49152 Qwen tokens (-c in the unit), and
-      # LibreChat counts with tiktoken: 47104 leaves headroom for the
-      # mismatch. Rates 0 (local).
+      # llama-server's window is 20480 Qwen tokens (-c in the unit; the 27B
+      # at 2-bit leaves room for no more within the VRAM budget), and
+      # LibreChat counts with tiktoken: 19456 leaves headroom for the
+      # mismatch. Rates 0 (local). 'qwen3.5-9b' stays for chats started
+      # before 2026-11-13: the same server answers them.
       tokenConfig:
+        'qwen3.8-27b':
+          prompt: 0
+          completion: 0
+          context: 19456
         'qwen3.5-9b':
           prompt: 0
           completion: 0
-          context: 47104
+          context: 19456
 
 # Web search for agents/chat. LibreChat's built-in webSearch can't be used:
 # v0.8.7 (and v0.8.8) refuse to enable it without a scraper (Firecrawl, Serper
@@ -402,14 +408,14 @@ modelSpecs:
   list:
     # Picked for first-time users and after chats are cleared; after that
     # new chats keep whatever was last chosen, or the default preset (in
-    # MongoDB: "Qwen 9B - Thinker", a copy of this spec). The large
+    # MongoDB: "Qwen 27B - Thinker", a copy of this spec). The large
     # Wikipedia and web search, the calculator and the sandbox are on;
     # Playwright and translate are added from the input bar (Qwen writes
     # Greek itself; Argos mistranslates). While the workstation is down,
     # pick the LiteRT-LM spec or an E2B preset by hand.
     - name: 'qwen-chat'
-      label: 'Qwen3.5 9B'
-      description: 'Qwen3.5-9B on the workstation GPU: Wikipedia, web search and reading, calculator, code sandbox. Needs the workstation on; use LiteRT-LM otherwise.'
+      label: 'Qwen3.8 27B'
+      description: 'Qwen3.8-27B on the workstation GPU: Wikipedia, web search and reading, calculator, code sandbox. Needs the workstation on; use LiteRT-LM otherwise.'
       softDefault: true
       mcpServers:
         - 'wikipedia-large'
@@ -418,23 +424,22 @@ modelSpecs:
         - 'sandbox'
       preset:
         endpoint: 'Qwen'
-        model: 'qwen3.5-9b'
+        model: 'qwen3.8-27b'
         # The whole window (tokenConfig above). max_tokens is each model
-        # call's reply, thinking included. 20480, not the model card's
-        # 32768: the large tools return ~3-4k tokens a call, and 32768 left
-        # history and tool results only 14336. Hard maths took 8-14k tokens
-        # on this card; the one miss overthought past 30k anyway
-        # (2026-10-10).
-        maxContextTokens: 47104
-        max_tokens: 20480
+        # call's reply, thinking included: 8192 of the 19456 leaves ~11k for
+        # the prompt (~2.8k), history and tool results (the large tools
+        # return ~3-4k tokens a call). Hard problems may think past 8192
+        # and be cut off: the price of the 20k window.
+        maxContextTokens: 19456
+        max_tokens: 8192
         # Qwen's thinking-mode values; top_k and min_p are the endpoint's
         # addParams. Thinking is on by default (the chat template), and
         # llama-server returns it as reasoning_content, shown as "Thoughts".
         temperature: 1.0
         top_p: 0.95
-        presence_penalty: 1.5
+        presence_penalty: 0
         promptPrefix: |
-          You are Qwen3.5-9B, an open model from Alibaba's Qwen team, running locally on the user's workstation GPU. Today is {{current_date}}; your training data is older, so recent events are unknown to you.
+          You are Qwen3.8-27B, an open model from Alibaba's Qwen team, running locally on the user's workstation GPU. Today is {{current_date}}; your training data is older, so recent events are unknown to you.
 
           Rules:
           - Facts you are not certain of (names, dates, numbers, quotes, recent events, prices, URLs, APIs): search when you have search tools - Wikipedia (search it in English) for encyclopedic facts, web search for current events and everything else - and answer from the results. Check that a result names exactly what was asked; a similar name is a different person or thing. Without search tools, say how sure you are.
@@ -456,7 +461,7 @@ modelSpecs:
     # parameters only accept the user's real names (enum, set at startup).
     - name: 'qwen-organiser'
       label: 'Qwen Organiser'
-      description: 'Qwen3.5-9B with your calendar, tasks, notes and feeds. Every change asks you first. Needs the workstation on.'
+      description: 'Qwen3.8-27B with your calendar, tasks, notes and feeds. Every change asks you first. Needs the workstation on.'
       mcpServers:
         - 'lookup'
         - 'calendar'
@@ -467,11 +472,11 @@ modelSpecs:
         # - 'mail'
       preset:
         endpoint: 'Qwen'
-        model: 'qwen3.5-9b'
+        model: 'qwen3.8-27b'
         # Listings of weeks of events are long; organising needs little
-        # thinking. 16384 for the reply leaves 30720 for history and results.
-        maxContextTokens: 47104
-        max_tokens: 16384
+        # thinking. 6144 for the reply leaves ~13k for history and results.
+        maxContextTokens: 19456
+        max_tokens: 6144
         # Qwen's thinking-mode profile for precise tasks (model card):
         # temperature 0.6, presence_penalty 0. A secretary copies names,
         # times and ids from tool results; presence_penalty 1.5 penalises
@@ -480,7 +485,7 @@ modelSpecs:
         top_p: 0.95
         presence_penalty: 0
         promptPrefix: |
-          You are Qwen3.5-9B, running locally on the user's workstation GPU. You manage the user's Nextcloud calendar, tasks and notes, and read their RSS feeds. Today is {{current_date}}; the tools' replies give the exact time.
+          You are Qwen3.8-27B, running locally on the user's workstation GPU. You manage the user's Nextcloud calendar, tasks and notes, and read their RSS feeds. Today is {{current_date}}; the tools' replies give the exact time.
 
           Rules:
           - Look before you act or answer: when a request is about the user's own entries ("my shopping list", "what do I have this week", "move the lecture"), find them first (find searches events, tasks and notes at once; listings show a period), then act on what you found. If find has nothing, search again with other words or in the language the entries are written in before saying it doesn't exist.
