@@ -38,6 +38,11 @@ services:
       LITERT_SPECULATIVE_DECODING: "${LITERT_SPECULATIVE_DECODING:-true}"
       # 1 = reuse the last conversation's KV cache (patches/prefix_cache.py),
       # 0 = upstream behaviour (full prefill on every request).
+      # On-demand loading (patches/idle_unload.py): after this many seconds
+      # without a request that uses the model, the engine and the prefix
+      # cache are closed (~3.4 GB back); the next request reloads it (~36 s to
+      # the first token, plus 12-65 s per snapshot). 0 = keep it loaded.
+      LITERT_IDLE_UNLOAD_S: "${LITERT_IDLE_UNLOAD_S:-600}"
       LITERT_PREFIX_CACHE: "${LITERT_PREFIX_CACHE:-1}"
       # How many conversations stay alive, least recently used closed first,
       # and the container memory (MB) above which idle ones are closed. Each
@@ -173,6 +178,8 @@ services:
       LITERT_HF_REPO: "litert-community/embeddinggemma-2-text-270m-litert-lm"
       LITERT_MODEL_FILE: "embeddinggemma-2-text-270m.litertlm"
       LITERT_MODEL_ID: "embeddinggemma2-270m"
+      # Unloaded after this long unused, like litert-lm-1's chat model.
+      LITERT_IDLE_UNLOAD_S: "${LITERT_EMBED_IDLE_UNLOAD_S:-600}"
       # Not gpu: on the Pi 5's V3D (2026-10-09) a one-line query took 38 s vs
       # 0.9 s on CPU, a 1500-char chunk hit LiteRT's 2-min timeout, and it was
       # OOM-killed at 1 GiB (GPU buffers count against mem_limit).

@@ -68,6 +68,13 @@ EnvironmentFile=%h/.config/llama-qwen/env
 #                 and tool calls, parsed to OpenAI tool_calls.
 # Measured 2026-11-13: 15.6 tok/s generation and 432 tok/s prefill at depth 0,
 # 14.1 / 193 at 16k (the 9B it replaced: 44 / 1180).
+#   --sleep-idle-seconds 600  load on demand: after 10 min without a request
+#                 the server frees the model (VRAM 8571 -> 52 MiB, RSS 1530
+#                 -> 332 MiB) and reloads it on the next request: ~3 s while
+#                 the GGUF is in the page cache (2026-11-14). /health and
+#                 /v1/models keep answering while asleep, so LibreChat and
+#                 the Instagram readiness check (profile.cjs) still see Qwen.
+#                 The workstation is shared with other GPU work.
 ExecStart=/usr/bin/llama-server \
     --model %h/models/Qwen3.8-27B-UD-IQ2_XXS.gguf \
     --mmproj %h/models/Qwen3.8-27B-mmproj-F16.gguf --no-mmproj-offload \
@@ -79,6 +86,7 @@ ExecStart=/usr/bin/llama-server \
     --jinja --chat-template-kwargs '{"reasoning_effort":"medium"}' \
     --reasoning-budget 6144 \
     --reasoning-budget-message "I have run out of thinking time. I will now give my final answer directly and briefly, with no further working or checking." \
+    --sleep-idle-seconds 600 \
     --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 --repeat-penalty 1.0 \
     --no-webui
 Restart=always

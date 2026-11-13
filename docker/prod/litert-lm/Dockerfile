@@ -98,6 +98,8 @@ RUN f="$(find /opt/venv -path '*litert_lm_cli/commands/serve/util.py')" \
 # patches/hide_tools.py drops tools the model never needs (LITERT_HIDE_TOOLS).
 # patches/translation.py sends chats in other languages to the model in
 # English and translates the reply back (mcp-translate, agent-tools).
+# patches/idle_unload.py closes the engines after LITERT_IDLE_UNLOAD_S without
+# use, so the models load on demand instead of staying in RAM.
 # Fails the build on upstream drift.
 COPY patches/ /tmp/patches/
 RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_handler.py')")" \
@@ -105,7 +107,7 @@ RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_h
           /tmp/patches/title_gate.py \
           /tmp/patches/citations.py /tmp/patches/reminder.py \
           /tmp/patches/length.py /tmp/patches/hide_tools.py \
-          /tmp/patches/translation.py "$d/" \
+          /tmp/patches/translation.py /tmp/patches/idle_unload.py "$d/" \
     && python3 /tmp/patches/apply_prefix_cache.py "$d" \
     && python3 /tmp/patches/apply_reasoning.py "$d" \
     && python3 /tmp/patches/apply_memory_gate.py "$d" \
@@ -115,6 +117,7 @@ RUN d="$(dirname "$(find /opt/venv -path '*litert_lm_cli/commands/serve/openai_h
     && python3 /tmp/patches/apply_citations.py "$d" \
     && python3 /tmp/patches/apply_length.py "$d" \
     && python3 /tmp/patches/apply_translation.py "$d" \
+    && python3 /tmp/patches/apply_idle_unload.py "$d" \
     && rm -rf /tmp/patches
 
 WORKDIR /app

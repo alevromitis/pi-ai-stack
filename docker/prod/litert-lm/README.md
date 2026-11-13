@@ -50,6 +50,15 @@ ones that change behaviour you see in a chat:
   - **Memory:** each keeps its KV cache in RAM. The engine is ~2.3 GB, a
     first chat brings the container to ~3.9 GB, and each further short chat
     adds ~250–430 MB.
+  - **On demand (since 2026-11-14):** the engine loads on the first request
+    that needs it (upstream) and `patches/idle_unload.py` closes it, with the
+    cached conversations and snapshots, after `LITERT_IDLE_UNLOAD_S` (600)
+    without one; litert-lm-2 does the same with the embedding model
+    (`LITERT_EMBED_IDLE_UNLOAD_S`). Idle: litert-lm-1 ~60–270 MB instead of
+    ~3.4 GB. A cold request took 11–13 s with the model file in the page
+    cache, up to ~36 s to the first token from disk, plus 12–65 s per
+    snapshot rebuilt. Title/memory-gate requests and /v1/models don't count
+    as use. 0 keeps the model loaded.
   - **Why several:** until 2026-10-12 only one was kept, so any other
     request (another chat, a side request with other settings) evicted the
     chat in use. Live conversations alternate exactly on this engine, MTP on
