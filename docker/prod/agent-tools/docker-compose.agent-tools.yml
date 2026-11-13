@@ -24,8 +24,9 @@ name: agent-tools
 #   mcp-searxng-large :8080  the same, full tools and larger budgets, for Qwen
 #   mcp-wikipedia   :8000  offline Wikipedia search (Kiwix ZIM), internal only;
 #                          /mcp for gemma4-e2b, /large/mcp for Qwen
-#   mcp-calc        :8000  arithmetic, dates, letter counts (/mcp) and NTUA's
-#                          academic calendar (/academic/mcp); internal only
+#   mcp-calc        :8000  arithmetic, dates, letter counts (/mcp), NTUA's
+#                          academic calendar (/academic/mcp) and symbolic
+#                          maths / physics units (/math/mcp); internal only
 #   mcp-translate   :8000  offline translation (Argos models); internal only
 #   kiwix-serve     :8080  the same ZIM as web pages, published ${KIWIX_PORT}
 #
@@ -325,8 +326,11 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          # Python + the MCP SDK; nothing cached.
-          memory: 256M
+          # Python + the MCP SDK, plus the /math forkserver with sympy and
+          # pint loaded (~125 MiB idle together, 2026-11-13) and up to two
+          # short-lived children; a child that runs away is killed first
+          # (oom_score_adj) or at MATH_SECONDS (15 s).
+          memory: 384M
           pids: 64
     # No internet, no LAN, no files: pure computation.
     networks:

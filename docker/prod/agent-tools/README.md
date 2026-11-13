@@ -269,6 +269,39 @@ files beyond the image, ~0.17k tokens of schema.
   and rebuild `mcp-calc`. Past `covers`' end, every reply starts with a
   warning that the loaded calendar is last year's.
 
+## Symbolic maths and physics units (`mcp-calc`, `/math/mcp`)
+
+Added 2026-11-13 for the <feed> student assistant (the Instagram NTUA group
+agent; LibreChat server `math`, attached only there by
+`instagram-personal/setup_agent.py`). `calculate` gives numbers; first-year
+Analysis, Linear Algebra and Physics need algebra and units, which
+`gemma4-e2b` gets wrong by hand. Two tools (~1.4k characters of schema):
+
+* **`symbolic_math(operation, expression, variable, at, order)`** (sympy
+  1.14): `evaluate`, `simplify`, `expand`, `factor`, `derivative`,
+  `integral` (indefinite, or definite with `at` = "a, b"), `limit` (`at` =
+  0, oo, 0+), `solve` (an equation, or a system split by `;`), `series`;
+  matrices up to 6x6 as `[[1,2],[3,4]]` or `[1, 2; 3, 4]`: `determinant`,
+  `inverse`, `eigenvalues`, `eigenvectors`, `rank`, `rref`. Students'
+  writing works: `x^2 sin(x)`, `2x`, `e^x`, `ln`, `π`, `√`. Answers restate
+  the input and add a decimal (`= pi/4 ≈ 0.78539816`).
+* **`physics_units(quantity, to)`** (pint 0.26): conversions (`72 km/h` to
+  `m/s`, `25 degC` to `K`) and arithmetic with constants by name
+  (`planck_constant*speed_of_light/(500 nm)` to `eV` = 2.47968 eV). Empty
+  `to` gives SI base units.
+* **Untrusted text.** sympy's own parsers eval their input, so
+  `mathtools.parse` turns the text into Python source with sympy's
+  tokenizer transformations and lets through only numbers, symbols,
+  arithmetic, whitelisted functions and matrices (`_Checker`) before
+  evaluating it with no builtins. pint parses with its own evaluator.
+  Either can still be asked for something huge (`10^10^10`, a hard
+  integral), so each call runs in a child forked from a forkserver that has
+  sympy and pint loaded (`mathchild.py`), killed after `MATH_SECONDS` (15
+  s) and first in line for the OOM killer; at most two at once. A call
+  takes ~2 s on the Pi; the forkserver starts with the server (~6 s).
+* **Tests.** `calc/test_mathtools.py` (not in the image):
+  `docker run --rm -v $PWD/calc/test_mathtools.py:/app/test_mathtools.py:ro agent-tools-calc:local python -m unittest test_mathtools`.
+
 ## Translation (`mcp-translate`)
 
 Added 2026-10-13, reversing the 2026-10-12 English-only decision. The

@@ -177,6 +177,16 @@ mcpServers:
     title: 'NTUA Calendar'
     description: "NTUA's academic calendar: semesters, exams, deadlines, days off."
     timeout: 10000
+  # Symbolic maths and physics units for <feed> coursework (sympy, pint):
+  # symbolic_math and physics_units, served by mcp-calc-1 on its own path so
+  # only the Instagram NTUA group agent takes them (setup_agent.py). Each
+  # call runs in a child process killed after 15 s (MATH_SECONDS).
+  math:
+    type: streamable-http
+    url: 'http://mcp-calc-1:8000/math/mcp'
+    title: 'Maths'
+    description: 'Symbolic algebra, calculus, matrices, units and physical constants.'
+    timeout: 30000
   # The same two sized for Qwen (qwen-chat): Wikipedia's /large/mcp (10
   # passages of <=1200 chars, ~3k tokens, plus wikipedia_read for an
   # article's lead or one section) and a second SearXNG server with full
@@ -235,14 +245,17 @@ mcpServers:
     description: 'Feeds and unread articles; mark read, star, subscribe.'
     # rss_read may fetch a title-only item's page and PDFs (60 s cap).
     timeout: 90000
-  # NTUA announcements only (FreshRSS category Edu: EMP + <feed> feeds),
-  # read-only, never marks anything read: ntua_news + ntua_news_read for the
-  # Instagram NTUA group agent (instagram-personal setup_agent.py).
-  ntua-news:
+  # <feed>'s and NTUA's feeds only (FreshRSS category Edu), read-only, never
+  # marks anything read: semfe_announcements (the school's own feed),
+  # ntua_news (the university-wide feeds) and read_announcement, for the
+  # Instagram NTUA group agent (instagram-personal setup_agent.py). Named
+  # "feeds", not "ntua-news": LibreChat appends "_mcp_<server>" to every
+  # tool name, and "semfe_announcements_mcp_ntua-news" read as NTUA's.
+  feeds:
     type: streamable-http
     url: 'http://mcp-freshrss-1:8000/freshrss-edu/mcp'
-    title: 'NTUA News'
-    description: 'NTUA and <feed> announcements, news and events from FreshRSS.'
+    title: '<feed> and NTUA Feeds'
+    description: "<feed>'s announcements and NTUA-wide news, events and announcements from FreshRSS."
     timeout: 90000
   calendar:
     type: streamable-http

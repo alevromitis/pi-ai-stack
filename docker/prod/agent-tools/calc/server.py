@@ -10,15 +10,24 @@ academic calendar (academic.py, data in ntua_calendar.json, baked into the
 image). Its own endpoint, so LibreChat lists it as its own server and a
 spec takes it without the calculator.
 
-Endpoints: /mcp (calculator), /academic/mcp (calendar); Streamable HTTP,
-stateless, JSON responses; /healthz.
+A third, /math/mcp: symbolic_math (sympy) and physics_units (pint) for
+<feed> coursework (mathtools.py). They take untrusted text that can ask for
+something huge, so each call runs in a child process forked from a
+forkserver that has already imported sympy and pint, and is killed after
+MATH_SECONDS.
+
+Endpoints: /mcp (calculator), /academic/mcp (calendar), /math/mcp (maths);
+Streamable HTTP, stateless, JSON responses; /healthz.
 """
 
 import contextlib
 import datetime
 import logging
+import multiprocessing
 import os
+from typing import Annotated, Literal
 
+import anyio
 import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -31,6 +40,7 @@ from starlette.routing import Mount, Route
 
 import academic
 import calc
+import mathchild
 
 
 def env(name: str, default: str | None = None) -> str:
@@ -133,6 +143,99 @@ calendar._tool_manager.get_tool("academic_calendar").parameters = {
 }
 
 
+maths = MCPServer("math", log_level="WARNING")
+MATH_SECONDS = int(os.environ.get("MATH_SECONDS", "15"))
+_forks = multiprocessing.get_context("forkserver")
+_forks.set_forkserver_preload(["mathtools"])
+_math_slots = anyio.Semaphore(2)
+
+
+def _in_child(name: str, args: tuple) -> str:
+    receive, send = _forks.Pipe(duplex=False)
+    child = _forks.Process(target=mathchild.run, args=(send, name, args, MATH_SECONDS + 5), daemon=True)
+    child.start()
+    send.close()
+    try:
+        if not receive.poll(MATH_SECONDS):
+            raise ToolError(f"{name}: took longer than {MATH_SECONDS} s; try a simpler or smaller form")
+        status, text = receive.recv()
+    except EOFError:
+        raise ToolError(f"{name}: stopped (out of memory or time); try a simpler or smaller form") from None
+    finally:
+        if child.is_alive():
+            child.kill()
+        child.join(2)
+        receive.close()
+    if status != "ok":
+        raise ToolError(f"{name}: {text}")
+    return text
+
+
+async def _isolated(name: str, *args) -> str:
+    try:
+        async with _math_slots:
+            return await anyio.to_thread.run_sync(_in_child, name, args)
+    finally:
+        log.info("%s", name)
+
+
+def _warm_forkserver() -> None:
+    """Start the forkserver (it imports sympy and pint, ~10 s on the Pi) now,
+    not on a student's first question."""
+    receive, send = _forks.Pipe(duplex=False)
+    child = _forks.Process(target=mathchild.ping, args=(send,), daemon=True)
+    child.start()
+    send.close()
+    receive.poll(120)
+    child.join(5)
+    receive.close()
+
+
+Operation = Literal["evaluate", "simplify", "expand", "factor", "derivative", "integral", "limit", "solve",
+                    "series", "determinant", "inverse", "eigenvalues", "eigenvectors", "rank", "rref"]
+
+
+async def symbolic_math(
+    operation: Annotated[Operation, "what to do"],
+    expression: Annotated[str, "e.g. x^2*sin(x), x^2-5x+6=0, x+y=3; x-y=1, [[1,2],[3,4]]"],
+    variable: str = "",
+    at: str = "",
+    order: int = 0,
+) -> str:
+    return await _isolated("symbolic_math", operation, expression[:MAX_CHARS], variable[:50], at[:100], order)
+
+
+async def physics_units(quantity: str, to: str = "") -> str:
+    return await _isolated("physics_units", quantity[:MAX_CHARS], to[:100])
+
+
+MATH_TOOLS = [
+    (symbolic_math, "Exact algebra and calculus: simplify, expand, factor, derivative, integral, limit, solve "
+                    "equations or systems, series; matrices: determinant, inverse, eigenvalues, eigenvectors, rank, rref.", {
+        "properties": {
+            "operation": {"type": "string", "enum": list(Operation.__args__)},
+            "expression": {"type": "string", "description": "e.g. x^2*sin(x), x^2-5x+6=0, x+y=3; x-y=1 or [[1,2],[3,4]]"},
+            "variable": {"type": "string", "description": "e.g. x, or x,y to solve for; default: the only one"},
+            "at": {"type": "string", "description": "limit or series point (0, oo, 0+) or integral bounds (0, pi)"},
+            "order": {"type": "integer", "description": "derivative order or series terms"},
+        },
+        "required": ["operation", "expression"],
+    }),
+    (physics_units, "Physics units and constants: convert a quantity, or compute with constants such as speed_of_light, "
+                    "planck_constant, hbar, elementary_charge, electron_mass, boltzmann_constant, avogadro_constant, "
+                    "gravitational_constant, standard_gravity, vacuum_permittivity.", {
+        "properties": {
+            "quantity": {"type": "string", "description": "e.g. 72 km/h, 25 degC or planck_constant*speed_of_light/(500 nm)"},
+            "to": {"type": "string", "description": "unit wanted, e.g. m/s, K, eV; empty: SI base units"},
+        },
+        "required": ["quantity"],
+    }),
+]
+for fn, description, schema in MATH_TOOLS:
+    maths.add_tool(fn, description=description, structured_output=False, annotations=ANNOTATIONS)
+    maths._tool_manager.get_tool(fn.__name__).parameters = {"type": "object", **schema}
+
+
 def main() -> None:
     logging.basicConfig(level=logging.WARNING)
     log.setLevel(logging.INFO)
@@ -145,20 +248,21 @@ def main() -> None:
     )
     apps = {
         name: server.streamable_http_app(stateless_http=True, json_response=True, transport_security=security, host="0.0.0.0")
-        for name, server in (("calc", mcp), ("academic", calendar))
+        for name, server in (("calc", mcp), ("academic", calendar), ("math", maths))
     }
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette):
         # A mounted app's own lifespan doesn't run; start the session managers here.
-        async with mcp.session_manager.run(), calendar.session_manager.run():
+        async with mcp.session_manager.run(), calendar.session_manager.run(), maths.session_manager.run():
+            await anyio.to_thread.run_sync(_warm_forkserver)
             yield
 
     async def healthz(_request: Request) -> PlainTextResponse:
         return PlainTextResponse("ok")
 
     uvicorn.run(
-        Starlette(routes=[Route("/healthz", healthz), Mount("/academic", app=apps["academic"]), Mount("/", app=apps["calc"])], lifespan=lifespan),
+        Starlette(routes=[Route("/healthz", healthz), Mount("/academic", app=apps["academic"]), Mount("/math", app=apps["math"]), Mount("/", app=apps["calc"])], lifespan=lifespan),
         host="0.0.0.0",
         port=int(env("MCP_PORT", "8000")),
         log_level="warning",
