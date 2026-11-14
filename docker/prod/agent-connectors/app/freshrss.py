@@ -298,9 +298,10 @@ async def rss_subscribe(url: str, category: str = "") -> str:
 SAMPS_CATEGORY = env("FRESHRSS_SAMPS_CATEGORY", "SAMPS")
 NTUA_CATEGORY = env("FRESHRSS_NTUA_CATEGORY", "NTUA")
 UNIACTION_CATEGORY = env("FRESHRSS_UNIACTION_CATEGORY", "UniAction")
+FOITITIKANEA_CATEGORY = env("FRESHRSS_FOITITIKANEA_CATEGORY", "foititikanea.gr")
 FEED_CATEGORIES = [
     c.strip()
-    for c in env("FRESHRSS_FEED_CATEGORIES", f"{SAMPS_CATEGORY},{NTUA_CATEGORY},{UNIACTION_CATEGORY}").split(",")
+    for c in env("FRESHRSS_FEED_CATEGORIES", f"{SAMPS_CATEGORY},{NTUA_CATEGORY},{UNIACTION_CATEGORY},{FOITITIKANEA_CATEGORY}").split(",")
     if c.strip()
 ]
 SCAN = 200
@@ -314,9 +315,11 @@ def _fold(text: str) -> str:
 
 
 def _source(item: dict, category: str) -> str:
-    """'<feed> announcement', 'NTUA event', 'UniAction event': who published it, in English."""
+    """'<feed> announcement', 'NTUA event', 'UniAction event', 'Foititikanea.gr news': who published it, in English."""
     if category == UNIACTION_CATEGORY:
         return "UniAction event"
+    if category == FOITITIKANEA_CATEGORY:
+        return "Foititikanea.gr news"
     feed = _fold(_feed(item))
     kind = next((name for word, name in _KINDS if word in feed), "item")
     return f"{'<feed>' if category == SAMPS_CATEGORY else 'NTUA'} {kind}"
