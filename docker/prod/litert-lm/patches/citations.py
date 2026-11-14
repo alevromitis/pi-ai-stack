@@ -75,8 +75,17 @@ _ENABLED = os.environ.get("LITERT_CITATIONS", "1") != "0"
 _URL = re.compile(r"https?://[^\s)\]>\"'<]+")
 # Wikipedia paths hold balanced parentheses: [Titan (moon)](.../Titan_(moon)).
 _MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://(?:[^\s()]|\([^\s()]*\))+)\)")
-# A Sources block header: "Sources:", "**Sources:**", "### Sources", "Source:".
-_HEADER = re.compile(r"^[\s*_#>-]*sources?[\s*_]*(?::|\s*$)", re.IGNORECASE)
+# A Sources block header: "Sources:", "**Sources:**", "### Sources", "Source:",
+# and the Greek "Πηγές:" / "Πηγή:". Instagram requests skip translation, so
+# gemma4-e2b answers Greek mentions in Greek: its "Πηγές:" block of bare
+# links passed through, the server's line was added after it, and the group
+# saw two lists of different links (2026-11-14).
+_HEADER = re.compile(r"^[\s*_#>-]*(?:sources?|πηγ(?:ή|η|ές|ες))[\s*_]*(?::|\s*$)", re.IGNORECASE)
+_HEADER_WORDS = ("sources", "πηγές", "πηγες", "πηγή", "πηγη")
+# A block of names only ("Πηγές:\n• Οδηγός Σπουδών"): the files the model
+# searched, which no link can be made up in.
+_LIST_ITEM = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+\S")
+_LETTERS = re.compile(r"[^\W\d_]{2,}")
 _LEAD = re.compile(r"^[\s*_#>-]+")
 # A Markdown link to anything: "[Odyssey]([URL not provided])", "[curl](URL N/A)".
 _ANY_LINK = re.compile(r"\[[^\]\n]+\]\([^)\n]*\)")
@@ -433,7 +442,21 @@ class Filter:
   def _maybe_header(partial: str) -> bool:
     word = _LEAD.sub("", partial).lower()
     # A line opening with a link may be a line of links: held to its end.
-    return "sources".startswith(word) or word.startswith("source") or word.startswith("[")
+    return (any(h.startswith(word) for h in _HEADER_WORDS) or word.startswith(("source", "πηγ"))
+            or word.startswith("["))
+
+  @staticmethod
+  def _names_only(block: list[str]) -> bool:
+    """A held block that lists names, no links of any kind: on the header's
+    line ("Sources: Study guide") or as list items under it. "Sources: []"
+    lists nothing and goes."""
+    text = "".join(block)
+    if _ANY_LINK.search(text):
+      return False
+    lines = text.splitlines() or [""]
+    first = _HEADER.sub("", lines[0], count=1)
+    return bool(_LETTERS.search(first)) or any(
+        _LIST_ITEM.match(line) and _LETTERS.search(line) for line in lines[1:])
 
   def _sep(self) -> str:
     return "" if not self._wrote or self._tail.endswith("\n\n") else "\n" if self._tail.endswith("\n") else "\n\n"
@@ -455,7 +478,8 @@ class Filter:
     if has_tool_calls:
       return self._emit([held, *(block or [])])
     links = _URL.findall("".join(block or []))
-    if not self._sources and (block is None or links and set(links) <= self._known):
+    if not self._sources and (block is None or links and set(links) <= self._known
+                              or not links and self._names_only(block)):
       return self._code(self._emit([held, *(block or [])]))
     # Prose the model wrote after its Sources header is kept; link lines go,
     # and so do links to no URL and a second header: "**Sources:**" then
