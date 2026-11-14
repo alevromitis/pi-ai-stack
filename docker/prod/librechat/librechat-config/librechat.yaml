@@ -197,7 +197,8 @@ mcpServers:
   # passages of <=1200 chars, ~3k tokens, plus wikipedia_read for an
   # article's lead or one section) and a second SearXNG server with full
   # schemas (time_range, language; web_url_read pages long pages or reads
-  # one section), 10 results, 16k-char pages. On the Pi's CPU these would
+  # one section), 10 results, 6000-char pages (more in parts, to fit
+  # Qwen's 20k window: see agent-tools). On the Pi's CPU these would
   # cost minutes of prefill a call: keep them off the LiteRT-LM specs.
   wikipedia-large:
     type: streamable-http
@@ -409,27 +410,31 @@ modelSpecs:
   list:
     # Picked for first-time users and after chats are cleared; after that
     # new chats keep whatever was last chosen, or the default preset (in
-    # MongoDB: "Qwen 27B - Thinker", a copy of this spec). The large
-    # Wikipedia and web search, the calculator and the sandbox are on;
+    # MongoDB: "Qwen 27B - Thinker", a copy of this spec with
+    # spec: 'qwen-chat', which is what gives its chats these MCP servers:
+    # a preset without a spec starts with none). The large Wikipedia and web
+    # search, the calculator, NTUA's academic calendar and the sandbox are on;
     # Playwright and translate are added from the input bar (Qwen writes
     # Greek itself; Argos mistranslates). While the workstation is down,
     # pick the LiteRT-LM spec or an E2B preset by hand.
     - name: 'qwen-chat'
       label: 'Qwen3.8 27B'
-      description: 'Qwen3.8-27B on the workstation GPU: Wikipedia, web search and reading, calculator, code sandbox. Needs the workstation on; use LiteRT-LM otherwise.'
+      description: 'Qwen3.8-27B on the workstation GPU: Wikipedia, web search and reading, calculator, NTUA calendar, code sandbox. Needs the workstation on; use LiteRT-LM otherwise.'
       softDefault: true
       mcpServers:
         - 'wikipedia-large'
         - 'searxng-large'
         - 'calc'
+        - 'ntua-calendar'
         - 'sandbox'
       preset:
         endpoint: 'Qwen'
         model: 'qwen3.8-27b'
         # The whole window (tokenConfig above). max_tokens is each model
         # call's reply, thinking included: 8192 of the 19456 leaves ~11k for
-        # the prompt (~2.8k), history and tool results (the large tools
-        # return ~3-4k tokens a call). Hard problems may think past 8192
+        # the prompt (~3.4k with the tool schemas), history and tool results
+        # (a search ~1.5k tokens, a page read ~2.6-3.4k, a Wikipedia section
+        # up to ~3k). Hard problems may think past 8192
         # and be cut off: the price of the 20k window.
         maxContextTokens: 19456
         max_tokens: 8192
@@ -454,8 +459,9 @@ modelSpecs:
           - If a message is unclear or may not be literal, ask one short question.
           - Lead with the answer. Be concise unless asked for detail.
     # Qwen with the user's own data: Nextcloud Calendar, Tasks and Notes,
-    # one search over them (lookup), FreshRSS, and the calculator for date
-    # arithmetic; mail once enabled. No web or sandbox (see above). Every
+    # one search over them (lookup), FreshRSS, the calculator for date
+    # arithmetic and NTUA's academic calendar (semester, exam and holiday
+    # dates, offline); mail once enabled. No web or sandbox (see above). Every
     # change waits for approval (toolApproval), so the prompt has it act
     # rather than ask first. The calendar is picked by the connector's rules
     # (NEXTCLOUD_CALENDAR_RULES), not by the model; the calendar and list
@@ -470,6 +476,7 @@ modelSpecs:
         - 'notes'
         - 'freshrss'
         - 'calc'
+        - 'ntua-calendar'
         # - 'mail'
       preset:
         endpoint: 'Qwen'

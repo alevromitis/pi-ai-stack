@@ -230,11 +230,14 @@ services:
       searxng:
         priority: 10
 
-  # The same server sized for Qwen (47k window, ~1k tok/s prefill on the
-  # workstation GPU): full tool schemas (time_range, language, page number;
-  # web_url_read pages long pages with startChar/maxLength, reads one
-  # section, or lists headings), 10 results of 600 chars, pages 16k chars
-  # (~4k tokens) by default. A second container, ~60 MB.
+  # The same server sized for Qwen: full tool schemas (time_range, language,
+  # page number; web_url_read pages long pages with startChar/maxLength,
+  # reads one section, or lists headings), 10 results of 600 chars, pages
+  # 6000 chars by default. Qwen3.8-27B has a 20k window with an 8k reply
+  # budget: 16000-char pages (the 9B's 47k window) came back as 7.0k Qwen
+  # tokens in English and 9.1k in Greek, more than the ~7k left for history
+  # and every tool result of a turn. 6000 chars is ~2.6k / ~3.4k; longer
+  # pages are read in parts. A second container, ~60 MB.
   mcp-searxng-large:
     <<: *searxng
     container_name: mcp-searxng-large-1
@@ -247,7 +250,7 @@ services:
       SEARXNG_MAX_RESULTS: "10"
       SEARXNG_MAX_RESULT_CHARS: "600"
       # The default only: the model may ask for more with maxLength.
-      URL_READ_MAX_CHARS: "16000"
+      URL_READ_MAX_CHARS: "6000"
       SEARXNG_DEFAULT_LANGUAGE: en
 
   mcp-wikipedia:

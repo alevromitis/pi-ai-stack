@@ -64,10 +64,14 @@ are the main latency lever.
 `searxng-large`, attached by `qwen-chat`): the same image with the full
 schemas (`time_range`, `language`, `pageno`; `web_url_read` with
 `startChar`/`maxLength` paging, `section` and `readHeadings`), 10 results
-of ≤600 chars, and pages 16000 chars (~4k tokens) by default.
-`URL_READ_MAX_CHARS` is only the default there: a model that passes a
-larger `maxLength` gets more. Qwen prefills ~1000 tok/s on the
-workstation GPU, so the bigger budgets cost it seconds, not minutes; a
+of ≤600 chars, and pages 6000 chars by default (since 2026-11-14; 16000
+until then). `URL_READ_MAX_CHARS` is only the default there: a model that
+passes a larger `maxLength` gets more. Qwen3.8-27B runs with a 20k window
+and an 8k reply budget, which leaves ~7k tokens for history and every
+tool result of a turn: a 16000-char page measured 7.0k Qwen tokens in
+English and 9.1k in Greek (link-heavy Markdown is ~2.3 and ~1.75 chars a
+token), so one read filled the window. 6000 chars is ~2.6k / ~3.4k, and
+longer pages are read in parts with `startChar` or one `section`. A
 second container (~60 MB) keeps `mcp-searxng-1`'s output for Gemma
 unchanged.
 

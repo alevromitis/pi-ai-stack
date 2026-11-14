@@ -207,8 +207,8 @@ Model specs, one per task, each attaching only the servers it needs:
 
 | Spec | Model | MCP servers | Tool-schema cost |
 |---|---|---|---|
-| `qwen-chat` (soft default) | Qwen3.8-27B | `wikipedia-large`, `searxng-large`, `calc`, `sandbox` | ~2.8k tokens, ~3 s of GPU prefill |
-| `qwen-organiser` (*Qwen Organiser*) | Qwen3.8-27B | `lookup`, `calendar`, `tasks`, `notes`, `freshrss`, `calc` (+ `mail` once enabled); temperature 0.6, presence_penalty 0 | ~2.2k tokens, ~2 s of GPU prefill |
+| `qwen-chat` (soft default) | Qwen3.8-27B | `wikipedia-large`, `searxng-large`, `calc`, `ntua-calendar`, `sandbox` | ~2.9k tokens (Qwen tokenizer, 2026-11-14) |
+| `qwen-organiser` (*Qwen Organiser*) | Qwen3.8-27B | `lookup`, `calendar`, `tasks`, `notes`, `freshrss`, `calc`, `ntua-calendar` (+ `mail` once enabled); temperature 0.6, presence_penalty 0 | ~2.7k tokens (Qwen tokenizer, 2026-11-14) |
 | `pi-chat` | gemma4-e2b | none (add from the input bar) | — |
 | `pi-calendar` (*Calendar*) | gemma4-e2b | `calendar`, `tasks`, `freshrss` | ~1.2k tokens |
 
@@ -248,6 +248,14 @@ fetches. Apart, the web chat holds no personal data beyond saved
 memories, and the organiser's only way out is a write the user approves.
 The Qwen-sized `wikipedia-large` and `searxng-large` are described in
 [agent-tools](../agent-tools/README.md); keep them off the Pi specs.
+
+**The default preset carries the spec.** A spec's `mcpServers` reach a
+chat only through the spec: LibreChat's client applies them when the
+conversation has `spec` set, and clears the tool selection when it
+doesn't. The default preset in MongoDB ("Qwen 27B - Thinker") is a copy
+of `qwen-chat` and must keep `spec: 'qwen-chat'`; without it (until
+2026-11-14) its chats started with no tools, or with whatever was ticked
+by hand. Edit the preset after a backup, as in the 2026-11-13 change.
 
 LibreChat cannot filter individual MCP tools in config; for finer cuts
 build an agent in the UI and tick only the tools it needs.
