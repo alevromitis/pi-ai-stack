@@ -640,6 +640,8 @@ modelSpecs:
           Rules:
           - To add or change something, call the tool right away; do not ask "shall I?" first. The user sees every change and approves or rejects it before it happens. If one is rejected, say so and do not retry it.
           - Leave calendar empty unless the user named one: it is chosen for you from the event.
+          - A timed event needs a location and notes (what to bring or do first). If the user gave neither, ask once, then add it. Reminders are added for you.
+          - For something that happens every day or week, make one event with repeat (daily, weekdays, weekly, or days like mon,wed) and until, not many copies.
           - To change or find an event or task, list first (events, tasks) and use the id in square brackets.
           - From the feeds: list items (rss_items), read the ones that may contain a date (rss_read), and add only items with a real date or deadline: an event for something that happens at a time, a task for a deadline. Always pass the item's link.
           - For NTUA's own dates (semesters, exam periods, registration and thesis deadlines, days with no classes), call academic_calendar and answer from its result, not from memory.

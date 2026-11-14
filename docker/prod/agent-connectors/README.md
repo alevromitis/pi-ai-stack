@@ -96,6 +96,10 @@ empty as in the image. Nothing in this stack changes for it.
   whole series.
 * **Events with attendees** cannot be edited or deleted here: Nextcloud
   would email the attendees.
+* **Repeating events.** `event_add` takes `repeat` (`daily`, `weekdays`,
+  `weekly`, or days such as `mon,wed`) and `until` (last date; without it
+  the series stops after 60 occurrences). Editing one occurrence works as
+  before; a whole series can't be moved here.
 * **Filed once per link.** `event_add` and `task_add` take `link` (the RSS
   item's URL). It is stored as the entry's `URL` and as "Source: …" in its
   notes, and if any event or task — open or done — already has that `URL`,
@@ -104,8 +108,10 @@ empty as in the image. Nothing in this stack changes for it.
   scheduled re-run over the same items adds nothing.
 * **House style.** New events copy the conventions of the user's own
   calendars (checked 2026-10-07 over two of them): `STATUS:
-  CONFIRMED`, a `DISPLAY` reminder 10 minutes before whose text is the title
-  (`NEXTCLOUD_EVENT_ALARM`, empty for none), all-day events `TRANSPARENT`,
+  CONFIRMED`, `DISPLAY` reminders whose text is the title (timed events:
+  1 day, 1 hour and 10 minutes before, `NEXTCLOUD_EVENT_ALARM`, a
+  comma-separated list of iCalendar durations, empty for none; all-day
+  events: 09:00 on the day, `NEXTCLOUD_ALLDAY_ALARM`), all-day events `TRANSPARENT`,
   and title / location / one-line notes as in those calendars.
 * **Title-only feeds.** When an item has (almost) no text in the feed,
   `rss_read` fetches its page (`<article>`/`<main>`) and up to two PDFs it

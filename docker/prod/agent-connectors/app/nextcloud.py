@@ -70,9 +70,17 @@ DEFAULT_TASK_LIST = os.environ.get("NEXTCLOUD_DEFAULT_TASK_LIST", "")
 NOTE_MAX_CHARS = env_int("NEXTCLOUD_NOTE_MAX_CHARS", 8000)
 # New events copy the house style of the user's own calendar: CONFIRMED, a
 # DISPLAY reminder whose text is the title, all-day events TRANSPARENT.
-# The reminder offset is an iCalendar duration; empty means no reminder.
-_ALARM = os.environ.get("NEXTCLOUD_EVENT_ALARM", "-PT10M").strip()
-EVENT_ALARM = vDuration.from_ical(_ALARM) if _ALARM else None
+# Reminder offsets are iCalendar durations, comma-separated; empty means no
+# reminder. Timed events get a day-before, an hour-before and a 10-minute
+# reminder (a staggered set helps with time blindness); all-day events one
+# at 09:00 on the day (PT9H after the day's start).
+def _alarms(name: str, default: str) -> list:
+    raw = os.environ.get(name, default)
+    return [vDuration.from_ical(part.strip()) for part in raw.split(",") if part.strip()]
+
+
+EVENT_ALARMS = _alarms("NEXTCLOUD_EVENT_ALARM", "-P1D,-PT1H,-PT10M")
+ALLDAY_ALARMS = _alarms("NEXTCLOUD_ALLDAY_ALARM", "PT9H")
 MAX_LISTED = 80
 
 
@@ -572,14 +580,59 @@ def _route(title: str, location: str, notes: str, link: str) -> tuple[str, str]:
     return "", ""
 
 
+_WEEKDAYS = {"mon": "MO", "tue": "TU", "wed": "WE", "thu": "TH", "fri": "FR", "sat": "SA", "sun": "SU"}
+
+
+def _rrule(repeat: str, until: str, begin: date | datetime) -> dict | None:
+    """RRULE for repeat: daily, weekdays, weekly, or days like 'mon,wed'."""
+    word = repeat.strip().lower()
+    if not word:
+        return None
+    if word == "daily":
+        rule: dict = {"FREQ": "DAILY"}
+    elif word == "weekdays":
+        rule = {"FREQ": "WEEKLY", "BYDAY": ["MO", "TU", "WE", "TH", "FR"]}
+    elif word == "weekly":
+        rule = {"FREQ": "WEEKLY"}
+    else:
+        days = [_WEEKDAYS.get(d.strip()[:3]) for d in word.replace(" ", ",").split(",") if d.strip()]
+        if not days or None in days:
+            raise ToolError("repeat: use daily, weekdays, weekly, or weekdays such as 'mon,wed'.")
+        rule = {"FREQ": "WEEKLY", "BYDAY": days}
+    if until.strip():
+        last = parse_when(until, "until")
+        last_day = last.date() if isinstance(last, datetime) else last
+        if last_day < (begin.date() if isinstance(begin, datetime) else begin):
+            raise ToolError("until must not be before start.")
+        # Inclusive of the last day: end of that day, in UTC as RFC 5545 requires for a timed start.
+        rule["UNTIL"] = (
+            datetime(last_day.year, last_day.month, last_day.day, 23, 59, 59, tzinfo=TZ).astimezone(timezone.utc)
+            if isinstance(begin, datetime)
+            else last_day
+        )
+    else:
+        rule["COUNT"] = 60  # an open-ended series would fill the calendar; ask for until to go longer
+    return rule
+
+
 @tool(calendar_server, add_server, kind="write", service="Nextcloud")
 async def event_add(
-    title: str, start: str, end: str = "", calendar: str = "", location: str = "", notes: str = "", link: str = ""
+    title: str,
+    start: str,
+    end: str = "",
+    calendar: str = "",
+    location: str = "",
+    notes: str = "",
+    link: str = "",
+    repeat: str = "",
+    until: str = "",
 ) -> str:
     """Create an event. start: a date, datetime or words ('next tuesday 10:00'); a date-only start makes an all-day
     event. end: HH:MM, a datetime, or a last date; default 1 hour.
     calendar: only if the user named one; otherwise it is chosen for you.
-    link: the source URL (e.g. the RSS item's); a link already in the calendar or tasks is never added twice."""
+    link: the source URL (e.g. the RSS item's); a link already in the calendar or tasks is never added twice.
+    repeat: daily, weekdays, weekly, or days like 'mon,wed' to make it a repeating series from start; until: the
+    last date of the series (default: 60 occurrences)."""
     link = _source(link)
     if link and (existing := await _already_added(link)):
         return existing
@@ -600,11 +653,14 @@ async def event_add(
     event.add("STATUS", "CONFIRMED")
     if not isinstance(begin, datetime):
         event.add("TRANSP", "TRANSPARENT")
-    if EVENT_ALARM is not None:
+    rule = _rrule(repeat, until, begin)
+    if rule:
+        event.add("RRULE", rule)
+    for offset in EVENT_ALARMS if isinstance(begin, datetime) else ALLDAY_ALARMS:
         alarm = Alarm()
         alarm.add("ACTION", "DISPLAY")
         alarm.add("DESCRIPTION", title.strip())
-        alarm.add("TRIGGER", EVENT_ALARM)
+        alarm.add("TRIGGER", offset)
         event.add_component(alarm)
     if location.strip():
         event.add("LOCATION", location.strip())
@@ -616,7 +672,8 @@ async def event_add(
     await dav.put(href, _wrap(event))
     sid = dav.remember(uid, href)
     why = f" (matched {matched!r})" if matched else ""
-    return f"Created [{sid}] {title.strip()}: {_describe(begin, finish)} in {collection.name}{why}."
+    series = f", repeating {repeat.strip()}" + (f" until {until.strip()}" if until.strip() else " (60 times)") if rule else ""
+    return f"Created [{sid}] {title.strip()}: {_describe(begin, finish)}{series} in {collection.name}{why}."
 
 
 async def _occurrence(found: Found, master, day: date):
