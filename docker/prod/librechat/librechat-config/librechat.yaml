@@ -305,7 +305,7 @@ mcpServers:
   knowledge-kms:
     type: streamable-http
     url: 'http://knowledge-bridge-1:8000/kms/mcp'
-    title: 'Knowledge (work)'
+    title: 'Knowledge work'
     description: 'Work and homelab notes: search, read, and propose changes for approval.'
     timeout: 60000
     headers:
@@ -313,7 +313,7 @@ mcpServers:
   knowledge-pks:
     type: streamable-http
     url: 'http://knowledge-bridge-1:8000/pks/mcp'
-    title: 'Knowledge (personal)'
+    title: 'Knowledge personal'
     description: 'Personal notes: search, read, and propose changes for approval. Local models only.'
     timeout: 60000
     headers:
