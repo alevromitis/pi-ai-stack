@@ -310,6 +310,9 @@ mcpServers:
     timeout: 60000
     headers:
       Authorization: 'Bearer ${KNOWLEDGE_KMS_MCP_TOKEN}'
+    # The bridge answers 401 to LibreChat's header-less probe; without this
+    # LibreChat assumes OAuth and never connects with the bearer header.
+    requiresOAuth: false
   knowledge-pks:
     type: streamable-http
     url: 'http://knowledge-bridge-1:8000/pks/mcp'
@@ -318,6 +321,9 @@ mcpServers:
     timeout: 60000
     headers:
       Authorization: 'Bearer ${KNOWLEDGE_PKS_MCP_TOKEN}'
+    # The bridge answers 401 to LibreChat's header-less probe; without this
+    # LibreChat assumes OAuth and never connects with the bearer header.
+    requiresOAuth: false
   # Add-only view of the calendar and tasks (no edit/delete tools exist on
   # it), for agents that read untrusted feed text and file what they find.
   # calendar-add:
