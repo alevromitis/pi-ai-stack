@@ -111,9 +111,8 @@ services:
       sandbox:
         priority: 1
       # Knowledge stack's internal network, where knowledge-bridge-1 listens.
-      # Uncomment with the knowledge-kms/knowledge-pks entries in librechat.yaml.
-      # knowledge:
-      #   priority: 1
+      knowledge:
+        priority: 1
 #    dns:
 #      - ""
     volumes:
@@ -348,8 +347,8 @@ networks:
     # Owned by agent-sandbox stack (internal: true). Declared external so we join it.
     name: ${AGENT_SANDBOX_NETWORK:-agent-sandbox-internal}
     external: true
-  # Owned by the knowledge stack (internal: true, docker/prod/knowledge). Commented
-  # until that stack is up; the bridge's /kms/mcp and /pks/mcp are reached here.
-  # knowledge:
-  #   name: ${KNOWLEDGE_INTERNAL_NETWORK:-knowledge-internal}
-  #   external: true
+  # Owned by the knowledge stack (internal: true, docker/prod/knowledge);
+  # the bridge's /kms/mcp and /pks/mcp are reached here.
+  knowledge:
+    name: ${KNOWLEDGE_INTERNAL_NETWORK:-knowledge-internal}
+    external: true
