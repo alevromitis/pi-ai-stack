@@ -297,6 +297,30 @@ mcpServers:
   #   title: 'Mail'
   #   description: 'Your mailbox: list, read, and save drafts (never sends).'
   #   timeout: 60000
+  # The knowledge stack (docker/prod/knowledge), reached over its internal
+  # network. Off until the stack is up and both tokens are in
+  # .env.librechat. To turn them on, uncomment both entries below, the
+  # allowedAddresses line, and the knowledge-internal network in
+  # docker-compose.librechat.yml. knowledge-pks holds private notes: attach
+  # it only to model specs and agents that run on local models (LiteRT-LM
+  # on the Pi, Qwen on the workstation), never to a cloud endpoint. See
+  # docker/prod/knowledge/README.md.
+  # knowledge-kms:
+  #   type: streamable-http
+  #   url: 'http://knowledge-bridge-1:8000/kms/mcp'
+  #   title: 'Knowledge (work)'
+  #   description: 'Work and homelab notes: search, read, and propose changes for approval.'
+  #   timeout: 60000
+  #   headers:
+  #     Authorization: 'Bearer ${KNOWLEDGE_KMS_MCP_TOKEN}'
+  # knowledge-pks:
+  #   type: streamable-http
+  #   url: 'http://knowledge-bridge-1:8000/pks/mcp'
+  #   title: 'Knowledge (personal)'
+  #   description: 'Personal notes: search, read, and propose changes for approval. Local models only.'
+  #   timeout: 60000
+  #   headers:
+  #     Authorization: 'Bearer ${KNOWLEDGE_PKS_MCP_TOKEN}'
   # Add-only view of the calendar and tasks (no edit/delete tools exist on
   # it), for agents that read untrusted feed text and file what they find.
   # calendar-add:
@@ -338,6 +362,7 @@ mcpSettings:
     - 'mcp-freshrss-1:8000'
     - 'mcp-nextcloud-1:8000'
     # - 'mcp-mail-1:8000'
+    # - 'knowledge-bridge-1:8000'
     - 'agent-sandbox-gateway-1:8000'
     - 'instagram-personal-1:3000'
 
