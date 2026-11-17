@@ -66,6 +66,12 @@ endpoints:
       # top_k 64. The model file sets no sampler defaults (`litert-lm
       # describe`). The parameters panel has no top_k, so it is added to
       # every request here; temperature/top_p are set per preset or spec.
+      # While MTP is on (litert-lm's speculative_decoding, the default) the
+      # drafter and verifier are greedy, so temperature/top_p/top_k change
+      # nothing: E2B decodes like temperature 0, which suits RAG. LiteRT-LM
+      # does not read frequency_penalty or presence_penalty at all
+      # (parse_sampler_config), and one sampler covers thinking and answer,
+      # so there is no two-stage temperature. Steer E2B with the prompt.
       addParams:
         top_k: 64
       # LibreChat's built-in table says gemma4 has 128k context, so chats
