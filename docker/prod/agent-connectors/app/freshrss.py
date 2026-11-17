@@ -339,18 +339,25 @@ async def _search(category: str, what: str, query: str, days: int, limit: int) -
     limit = max(1, min(limit, 10))
     params = {"ot": str(int(time.time()) - days * 86400)} if days > 0 else {}
     items = await _items(category, **params)
-    items.sort(key=lambda i: int(i.get("published", 0)), reverse=True)
+    # Newest crawl first among equal times, so a renamed article shows its new title.
+    items.sort(key=lambda i: (int(i.get("published", 0)), int(i.get("crawlTimeMsec", 0))), reverse=True)
     words = _fold(query).split()
     blocks, seen = [], set()
     for item in items:
-        # The <feed> site publishes some items twice under two URLs.
-        key = (_fold(_title(item)), _stamp(item))
-        if key in seen:
+        # One article, two entries: the <feed> site publishes some items twice
+        # under two URLs (same title), and a renamed article (<feed> 2697, NTUA
+        # 5685, 2026-11-13) keeps its feed and published second. No two
+        # different articles shared a feed and second (checked 2026-11-17).
+        published = int(item.get("published", 0))
+        keys = {("title", _fold(_title(item)), published)}
+        if published:
+            keys.add(("feed", item.get("origin", {}).get("streamId") or _feed(item), published))
+        if keys & seen:
             continue
         text = html_to_text(item.get("summary", {}).get("content", ""))
         if words and not all(w in _fold(f"{_title(item)} {text}") for w in words):
             continue
-        seen.add(key)
+        seen |= keys
         blocks.append(
             # E2B rendered "Id: … · <feed> announcement · Fri …" as
             # "(Ιδιότητα: Fri …)" in Greek replies (2026-11-13): one field a
