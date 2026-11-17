@@ -148,5 +148,107 @@ class SerialGatewayTests(unittest.TestCase):
         client.close()
 
 
+class GatedModelHandler(http.server.BaseHTTPRequestHandler):
+    """Records arrival order; the first request waits until the test opens the gate."""
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        name = json.loads(body)['name']
+        with self.server.lock:
+            self.server.order.append(name)
+            first = len(self.server.order) == 1
+        if first:
+            self.server.gate.wait(5)
+        response = json.dumps({'name': name}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def log_message(self, *_args):
+        return
+
+
+def chat(name, user, step=False):
+    messages = [{'role': 'system', 'content': 'agent'}, {'role': 'user', 'content': user}]
+    if step:
+        messages += [{'role': 'assistant', 'content': '', 'tool_calls': [{'id': '1'}]},
+                     {'role': 'tool', 'tool_call_id': '1', 'content': 'result'}]
+    return json.dumps({'name': name, 'messages': messages})
+
+
+class RunPriorityTests(unittest.TestCase):
+    def setUp(self):
+        self.model = http.server.ThreadingHTTPServer(('127.0.0.1', 0), GatedModelHandler)
+        self.model.order, self.model.lock = [], threading.Lock()
+        self.model.gate = threading.Event()
+        threading.Thread(target=self.model.serve_forever, daemon=True).start()
+        self.gateway = gateway.SerialProxyServer(
+            ('127.0.0.1', 0), '127.0.0.1', self.model.server_port, 5)
+        threading.Thread(target=self.gateway.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.model.gate.set()
+        for server in (self.gateway, self.model):
+            server.shutdown()
+            server.server_close()
+
+    def post(self, body):
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self.gateway.server_port}/v1/chat/completions',
+            data=body.encode(), headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read())['name']
+
+    def queued(self, count):
+        deadline = time.monotonic() + 5
+        while self.gateway.slot.waiting() < count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.gateway.slot.waiting(), count)
+
+    def test_started_run_goes_before_new_requests(self):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            futures = [pool.submit(self.post, chat('A1', 'question A'))]
+            deadline = time.monotonic() + 5
+            while not self.model.order and time.monotonic() < deadline:
+                time.sleep(0.01)
+            # While A's first step runs: a new request, another run's step,
+            # then A's own next step, in that arrival order.
+            futures.append(pool.submit(self.post, chat('B1', 'question B')))
+            self.queued(1)
+            futures.append(pool.submit(self.post, chat('C2', 'question C', step=True)))
+            self.queued(2)
+            futures.append(pool.submit(self.post, chat('A2', 'question A', step=True)))
+            self.queued(3)
+            self.model.gate.set()
+            names = sorted(f.result(timeout=10) for f in futures)
+        self.assertEqual(names, ['A1', 'A2', 'B1', 'C2'])
+        self.assertEqual(self.model.order, ['A1', 'A2', 'C2', 'B1'])
+
+    def test_new_requests_keep_arrival_order(self):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(self.post, chat('N0', 'zero'))]
+            deadline = time.monotonic() + 5
+            while not self.model.order and time.monotonic() < deadline:
+                time.sleep(0.01)
+            for index, name in enumerate(('N1', 'N2', 'N3'), 1):
+                futures.append(pool.submit(self.post, chat(name, name)))
+                self.queued(index)
+            self.model.gate.set()
+            for future in futures:
+                future.result(timeout=10)
+        self.assertEqual(self.model.order, ['N0', 'N1', 'N2', 'N3'])
+
+    def test_run_shape(self):
+        key_a, step = gateway.run_shape(chat('x', 'question A').encode())
+        self.assertFalse(step)
+        key_a2, step = gateway.run_shape(chat('y', 'question A', step=True).encode())
+        self.assertTrue(step)
+        self.assertEqual(key_a, key_a2)
+        self.assertNotEqual(key_a, gateway.run_shape(chat('z', 'question B').encode())[0])
+        self.assertEqual(gateway.run_shape(b'not json'), (None, False))
+
+
 if __name__ == '__main__':
     unittest.main()

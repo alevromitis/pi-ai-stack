@@ -1,18 +1,37 @@
 """Single-request-at-a-time HTTP gateway for LibreChat's LiteRT chat model.
 
-The main HTTPServer is deliberately single-threaded. It does not accept the
-next LibreChat request for forwarding until the current upstream response has
-finished streaming. A separate lightweight health server stays responsive
-while a long model request is in progress.
+Only one request reaches the model at a time: the next one is forwarded
+when the current upstream response has finished streaming. Requests are
+accepted and read in parallel, and the free slot goes to
+
+1. the next step of the agent run that just had the model,
+2. the next step of any other run already in progress,
+3. a new request, oldest first.
+
+An agent reply is several model calls (think, call a tool, read its result,
+answer). In arrival order, a run that was mid-way waited behind every
+request that came in meanwhile, so its reply took as long as all of them.
+Letting a started run finish first sends each reply when its own work is
+done, and its steps reuse litert-lm's prefix cache for that conversation.
+A run step is a request whose messages already hold a tool call or tool
+result; the run is named by its first system and user messages.
+
+A separate lightweight health server stays responsive while a long model
+request is in progress.
 """
 
 from __future__ import annotations
 
+import hashlib
 import http.client
+import itertools
+import json
 import logging
 import os
+import select
+import socket
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 LOG = logging.getLogger("litert_chat_gateway")
@@ -28,6 +47,94 @@ class RequestError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
         self.status = status
+
+
+# Lower runs first: the run that last had the model, any started run, the
+# rest (new requests, model lists, anything that is not a chat request).
+PRIORITY_SAME_RUN, PRIORITY_RUN_STEP, PRIORITY_NEW = 0, 1, 2
+
+
+def run_shape(body: bytes) -> tuple[str | None, bool]:
+    """(run key, is a later step of a run) of a chat completions body.
+
+    The key hashes the system and first user message, which every step of
+    one agent run repeats. Unreadable bodies are new requests."""
+    try:
+        data = json.loads(body)
+        messages = data.get("messages")
+        if not isinstance(messages, list):
+            return None, False
+    except (ValueError, AttributeError, UnicodeDecodeError):
+        return None, False
+    head, step = [], False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role == "tool" or (role == "assistant" and message.get("tool_calls")):
+            step = True
+        if len(head) < 2 and role in ("system", "developer", "user"):
+            if role == "user" and any(m.get("role") == "user" for m in head):
+                continue
+            head.append({"role": role, "content": message.get("content")})
+    if not any(m["role"] == "user" for m in head):
+        return None, step
+    key = hashlib.sha256(json.dumps(head, sort_keys=True, ensure_ascii=False)
+                         .encode("utf-8", "surrogatepass")).hexdigest()
+    return key, step
+
+
+class Slot:
+    """The single upstream slot, granted by priority, then arrival order."""
+
+    def __init__(self):
+        self._lock = threading.Condition()
+        self._busy = False
+        self._waiting: list[tuple[int, str | None, bool]] = []
+        self._order = itertools.count()
+        self.last_run: str | None = None
+
+    def acquire(self, run_key: str | None, step: bool) -> None:
+        with self._lock:
+            entry = (next(self._order), run_key, step)
+            self._waiting.append(entry)
+            try:
+                while self._busy or self._first() is not entry:
+                    self._lock.wait()
+            finally:
+                self._waiting.remove(entry)
+            self._busy = True
+            if run_key is not None:
+                self.last_run = run_key
+
+    def release(self) -> None:
+        with self._lock:
+            self._busy = False
+            self._lock.notify_all()
+
+    def _priority(self, entry) -> int:
+        _order, run_key, step = entry
+        if step and run_key is not None and run_key == self.last_run:
+            return PRIORITY_SAME_RUN
+        return PRIORITY_RUN_STEP if step else PRIORITY_NEW
+
+    def _first(self):
+        return min(self._waiting, key=lambda e: (self._priority(e), e[0]))
+
+    def waiting(self) -> int:
+        with self._lock:
+            return len(self._waiting)
+
+
+def client_gone(connection: socket.socket) -> bool:
+    """True when the caller closed its connection while it waited."""
+    try:
+        readable, _, _ = select.select([connection], [], [], 0)
+        if not readable:
+            return False
+        return connection.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):
+        return True
 
 
 class SerialProxyHandler(BaseHTTPRequestHandler):
@@ -59,7 +166,35 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            # The whole body is read before waiting for the slot: the run
+            # it belongs to decides its place, and a slow sender must not
+            # hold the model.
             content_length, chunked = self._request_body_shape()
+            if chunked:
+                body = self._read_chunked_body()
+            elif content_length:
+                body = self._read_fixed_body(content_length)
+            else:
+                body = b""
+        except RequestError as error:
+            self.send_error(error.status, str(error))
+            return
+        except (OSError, TimeoutError):
+            return
+
+        run_key, step = (run_shape(body) if self.command == "POST" else (None, False))
+        slot = self.server.slot
+        slot.acquire(run_key, step)
+        try:
+            if client_gone(self.connection):
+                LOG.info("caller left while queued; request dropped")
+                return
+            self._forward(body)
+        finally:
+            slot.release()
+
+    def _forward(self, body: bytes):
+        try:
             upstream = http.client.HTTPConnection(
                 self.server.upstream_host,
                 self.server.upstream_port,
@@ -82,25 +217,20 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
                 for name, value in self.headers.items():
                     if (name.lower() in HOP_BY_HOP
                             or name.lower() in connection_tokens
-                            or name.lower() == "host"):
+                            or name.lower() in ("host", "content-length")):
                         continue
                     upstream.putheader(name, value)
-                if chunked:
-                    upstream.putheader("Transfer-Encoding", "chunked")
+                if body or self.command == "POST":
+                    upstream.putheader("Content-Length", str(len(body)))
                 upstream.putheader("Connection", "close")
                 upstream.endheaders()
-
-                if chunked:
-                    self._forward_chunked_body(upstream)
-                elif content_length:
-                    self._forward_fixed_body(upstream, content_length)
+                if body:
+                    upstream.send(body)
 
                 response = upstream.getresponse()
                 self._send_upstream_response(response)
             finally:
                 upstream.close()
-        except RequestError as error:
-            self.send_error(error.status, str(error))
         except (OSError, http.client.HTTPException, TimeoutError) as error:
             LOG.warning("upstream request failed: %s", type(error).__name__)
             try:
@@ -127,17 +257,18 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
             raise RequestError(413, "Request body too large")
         return length, False
 
-    def _forward_fixed_body(self, upstream: http.client.HTTPConnection, length: int):
-        remaining = length
+    def _read_fixed_body(self, length: int) -> bytes:
+        parts, remaining = [], length
         while remaining:
             data = self.rfile.read(min(COPY_BYTES, remaining))
             if not data:
                 raise RequestError(400, "Incomplete request body")
-            upstream.send(data)
+            parts.append(data)
             remaining -= len(data)
+        return b"".join(parts)
 
-    def _forward_chunked_body(self, upstream: http.client.HTTPConnection):
-        total = 0
+    def _read_chunked_body(self) -> bytes:
+        parts, total = [], 0
         while True:
             line = self.rfile.readline(8192)
             if not line or not line.endswith(b"\n"):
@@ -148,28 +279,20 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
                 raise RequestError(400, "Invalid chunk size") from error
             if size < 0:
                 raise RequestError(400, "Invalid chunk size")
-            upstream.send(line)
             if size == 0:
                 while True:
                     trailer = self.rfile.readline(8192)
                     if not trailer:
                         raise RequestError(400, "Incomplete chunk trailers")
-                    upstream.send(trailer)
                     if trailer in (b"\r\n", b"\n"):
-                        return
+                        return b"".join(parts)
             total += size
             if total > MAX_BODY_BYTES:
                 raise RequestError(413, "Request body too large")
-            self._copy_exact(upstream, size + 2)
-
-    def _copy_exact(self, upstream: http.client.HTTPConnection, length: int):
-        remaining = length
-        while remaining:
-            data = self.rfile.read(min(COPY_BYTES, remaining))
-            if not data:
-                raise RequestError(400, "Incomplete request body")
-            upstream.send(data)
-            remaining -= len(data)
+            chunk = self._read_fixed_body(size + 2)
+            if chunk[-2:] != b"\r\n":
+                raise RequestError(400, "Invalid chunked request body")
+            parts.append(chunk[:-2])
 
     def _send_upstream_response(self, response: http.client.HTTPResponse):
         self.send_response_only(response.status, response.reason)
@@ -205,10 +328,11 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
         LOG.info("%s - %s", self.client_address[0], fmt % args)
 
 
-class SerialProxyServer(HTTPServer):
-    """An HTTPServer (not ThreadingHTTPServer) to serialize model requests."""
+class SerialProxyServer(ThreadingHTTPServer):
+    """Accepts in parallel; Slot lets one request at a time reach the model."""
 
     allow_reuse_address = True
+    daemon_threads = True
     request_queue_size = 128
 
     def __init__(self, address, upstream_host: str, upstream_port: int,
@@ -217,12 +341,14 @@ class SerialProxyServer(HTTPServer):
         self.upstream_port = upstream_port
         self.upstream_timeout = upstream_timeout
         self.client_timeout = client_timeout
+        self.slot = Slot()
         super().__init__(address, SerialProxyHandler)
 
     def get_request(self):
         request, client_address = super().get_request()
         # A client that opens a connection and stops sending headers or body
-        # must not hold the single upstream slot forever.
+        # must not hold a handler thread forever. It no longer holds the
+        # upstream slot: bodies are read before the slot is requested.
         request.settimeout(self.client_timeout)
         return request, client_address
 

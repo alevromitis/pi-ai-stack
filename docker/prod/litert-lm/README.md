@@ -28,6 +28,32 @@ same seed 0.18 returns the same tokens, reasoning and tool calls as 0.17.1
 at the same speed, and the prefix cache still hits. Rollback: retag
 `litert-lm-rpi5:0.17.1` as `:local` and `make up`.
 
+## The chat gateway
+
+Clients don't reach `serve` directly: `litert-chat-gateway-1`
+(`gateway/litert_chat_gateway.py`) holds the `litert-lm-1` name on the
+external network and the published port, and passes one request at a time
+to the model (`litert-chat-upstream`). It reads every request in full as it
+arrives, and when the model is free it forwards
+
+1. the next step of the agent run that just had the model,
+2. the next step of any other run already in progress,
+3. a new request, oldest first.
+
+An agent reply is several model calls (think, call a tool, read the result,
+answer). Until 2026-11-17 every call took its turn as it came in, so with several
+Instagram mentions waiting, each reply's steps took turns with the others'
+and every reply went out only when nearly all were done. Now a started reply
+finishes first and goes out, and its steps hit the prefix cache. A step is a
+request whose messages already hold a tool call or a tool result; requests
+belong to one run when their first system and user messages match. A
+request whose caller has hung up while it waited is dropped, not run.
+
+The script is mounted read-only, so after editing it run
+`docker restart litert-chat-gateway-1` (check that nothing is generating
+first: a restart cuts the reply in progress). Its tests run offline:
+`python3 -m unittest discover -s tests -p 'test_litert_chat_gateway.py'`.
+
 ## What the image changes
 
 Upstream `serve` is patched at build time (`Dockerfile`, `patches/`); every
